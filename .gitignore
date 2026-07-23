@@ -1,12 +1,15 @@
 .env
 .venv/
 .venv-agent/
+.venv-backend/
 __pycache__/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
 node_modules/
+.npm-cache/
 dist/
 .idea/
 .vscode/
 *.log
+*.db
