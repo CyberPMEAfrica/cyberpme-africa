@@ -19,6 +19,7 @@ class Config:
     name: str
     hostname: str
     interval: int
+    enrollment_key: str
 
     @classmethod
     def from_environment(cls, interval_override: int | None = None) -> "Config":
@@ -28,12 +29,14 @@ class Config:
             name=os.getenv("CYBERPME_SERVER_NAME", hostname),
             hostname=hostname,
             interval=interval_override or int(os.getenv("CYBERPME_INTERVAL", "60")),
+            enrollment_key=os.getenv("CYBERPME_ENROLLMENT_KEY", ""),
         )
 
 
-def request_json(method: str, url: str, payload: dict[str, Any] | None = None) -> Any:
+def request_json(method: str, url: str, payload: dict[str, Any] | None = None, headers: dict[str, str] | None = None) -> Any:
     data = json.dumps(payload).encode("utf-8") if payload is not None else None
-    request = Request(url, data=data, method=method, headers={"Content-Type": "application/json"})
+    request_headers = {"Content-Type": "application/json", **(headers or {})}
+    request = Request(url, data=data, method=method, headers=request_headers)
     try:
         with urlopen(request, timeout=15) as response:
             return json.loads(response.read().decode("utf-8"))
@@ -53,18 +56,16 @@ def discover_ip() -> str | None:
         return None
 
 
-def ensure_server(config: Config) -> str:
-    servers = request_json("GET", f"{config.api_url}/api/v1/servers")
-    existing = next((server for server in servers if server["hostname"] == config.hostname), None)
-    if existing:
-        return existing["id"]
-
-    server = request_json(
+def register_agent(config: Config) -> tuple[str, str]:
+    if not config.enrollment_key:
+        raise RuntimeError("CYBERPME_ENROLLMENT_KEY doit être configurée.")
+    registration = request_json(
         "POST",
-        f"{config.api_url}/api/v1/servers",
+        f"{config.api_url}/api/v1/agents/register",
         {"name": config.name, "hostname": config.hostname, "ip_address": discover_ip()},
+        {"X-Enrollment-Key": config.enrollment_key},
     )
-    return server["id"]
+    return registration["server_id"], registration["agent_token"]
 
 
 def collect_metrics() -> dict[str, float]:
@@ -75,9 +76,14 @@ def collect_metrics() -> dict[str, float]:
     }
 
 
-def send_once(config: Config, server_id: str) -> dict[str, Any]:
+def send_once(config: Config, server_id: str, agent_token: str) -> dict[str, Any]:
     metrics = collect_metrics()
-    result = request_json("POST", f"{config.api_url}/api/v1/servers/{server_id}/metrics", metrics)
+    result = request_json(
+        "POST",
+        f"{config.api_url}/api/v1/servers/{server_id}/metrics",
+        metrics,
+        {"Authorization": f"Bearer {agent_token}"},
+    )
     print(
         f"Mesure envoyée — CPU {metrics['cpu_percent']} % | "
         f"RAM {metrics['memory_percent']} % | Disque {metrics['disk_percent']} %",
@@ -89,12 +95,12 @@ def send_once(config: Config, server_id: str) -> dict[str, Any]:
 def run(config: Config, once: bool) -> None:
     print(f"CyberPME Agent 0.1.0 — {platform.system()} {platform.release()}")
     print(f"Serveur: {config.name} ({config.hostname}) | API: {config.api_url}")
-    server_id = ensure_server(config)
+    server_id, agent_token = register_agent(config)
     print(f"Enregistrement confirmé — identifiant {server_id}")
 
     while True:
         try:
-            send_once(config, server_id)
+            send_once(config, server_id, agent_token)
         except RuntimeError as exc:
             print(f"Erreur temporaire: {exc}", flush=True)
         if once:

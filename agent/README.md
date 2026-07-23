@@ -15,6 +15,7 @@ Test avec une seule mesure :
 
 ```powershell
 $env:CYBERPME_SERVER_NAME="Mon PC"
+$env:CYBERPME_ENROLLMENT_KEY="votre-cle-enrolement"
 .\.venv-agent\Scripts\cyberpme-agent.exe --once
 ```
 
@@ -25,3 +26,5 @@ Exécution continue :
 ```
 
 Arrêter avec `Ctrl+C`. Les variables disponibles sont décrites dans `.env.example`.
+
+La clé d'enrôlement autorise l'installation initiale. L'API remet ensuite un jeton individuel à l'agent; seul son condensat SHA-256 est conservé dans PostgreSQL.

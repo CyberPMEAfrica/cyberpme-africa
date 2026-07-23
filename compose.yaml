@@ -23,6 +23,7 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       ALERT_EMAIL_FROM: ${ALERT_EMAIL_FROM:-alerts@cyberpme.local}
       ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-bocorodrigue43@mail.com}
+      AGENT_ENROLLMENT_KEY: ${AGENT_ENROLLMENT_KEY:?AGENT_ENROLLMENT_KEY must be set}
     ports: ["8000:8000"]
     depends_on:
       database:

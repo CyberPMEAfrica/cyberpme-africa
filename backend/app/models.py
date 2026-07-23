@@ -20,6 +20,7 @@ class Server(Base):
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     metrics: Mapped[list["Metric"]] = relationship(back_populates="server", cascade="all, delete-orphan")
     alerts: Mapped[list["Alert"]] = relationship(back_populates="server", cascade="all, delete-orphan")
+    credential: Mapped["AgentCredential | None"] = relationship(back_populates="server", cascade="all, delete-orphan", uselist=False)
 
 
 class Metric(Base):
@@ -46,3 +47,11 @@ class Alert(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     server: Mapped[Server] = relationship(back_populates="alerts")
+
+
+class AgentCredential(Base):
+    __tablename__ = "agent_credentials"
+    server_id: Mapped[UUID] = mapped_column(ForeignKey("servers.id", ondelete="CASCADE"), primary_key=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    server: Mapped[Server] = relationship(back_populates="credential")

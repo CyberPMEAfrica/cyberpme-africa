@@ -51,6 +51,8 @@ jobs:
   docker-compose:
     name: Validation Docker Compose
     runs-on: ubuntu-latest
+    env:
+      AGENT_ENROLLMENT_KEY: ci-enrollment-secret
     steps:
       - name: Récupérer le code
         uses: actions/checkout@v4

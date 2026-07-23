@@ -43,3 +43,12 @@ class AlertRead(BaseModel):
     recommendation: str
     created_at: datetime
     resolved_at: datetime | None
+
+
+class AgentRegistration(ServerCreate):
+    pass
+
+
+class AgentRegistrationRead(BaseModel):
+    server_id: UUID
+    agent_token: str

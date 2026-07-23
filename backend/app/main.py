@@ -1,7 +1,10 @@
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+import hashlib
+import hmac
+import secrets
 from uuid import UUID
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -9,8 +12,8 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import Base, engine, get_db
 from app.email_notifications import send_alert_email
-from app.models import Alert, Metric, Server
-from app.schemas import AlertRead, MetricCreate, MetricRead, ServerCreate, ServerRead
+from app.models import AgentCredential, Alert, Metric, Server
+from app.schemas import AgentRegistration, AgentRegistrationRead, AlertRead, MetricCreate, MetricRead, ServerCreate, ServerRead
 
 
 @asynccontextmanager
@@ -27,6 +30,18 @@ def server_response(db: Session, server: Server) -> ServerRead:
     latest = db.scalar(select(Metric).where(Metric.server_id == server.id).order_by(Metric.collected_at.desc()).limit(1))
     data = ServerRead.model_validate(server)
     return data.model_copy(update={"latest_metric": MetricRead.model_validate(latest) if latest else None})
+
+
+def token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def require_agent(server: Server, authorization: str | None) -> None:
+    if not authorization or not authorization.startswith("Bearer ") or server.credential is None:
+        raise HTTPException(status_code=401, detail="Jeton agent requis.")
+    supplied_hash = token_hash(authorization.removeprefix("Bearer ").strip())
+    if not hmac.compare_digest(supplied_hash, server.credential.token_hash):
+        raise HTTPException(status_code=401, detail="Jeton agent invalide.")
 
 
 @app.get("/")
@@ -56,6 +71,28 @@ def create_server(payload: ServerCreate, db: Session = Depends(get_db)) -> Serve
 def list_servers(db: Session = Depends(get_db)) -> list[ServerRead]:
     servers = db.scalars(select(Server).order_by(Server.created_at.desc())).all()
     return [server_response(db, server) for server in servers]
+
+
+@app.post("/api/v1/agents/register", response_model=AgentRegistrationRead)
+def register_agent(payload: AgentRegistration, x_enrollment_key: str | None = Header(default=None), db: Session = Depends(get_db)) -> AgentRegistrationRead:
+    if not x_enrollment_key or not hmac.compare_digest(x_enrollment_key, settings.agent_enrollment_key):
+        raise HTTPException(status_code=401, detail="Clé d’enrôlement invalide.")
+    server = db.scalar(select(Server).where(Server.hostname == payload.hostname))
+    if server is None:
+        server = Server(**payload.model_dump())
+        db.add(server)
+        db.flush()
+    else:
+        server.name = payload.name
+        server.ip_address = payload.ip_address
+    raw_token = secrets.token_urlsafe(32)
+    if server.credential is None:
+        server.credential = AgentCredential(token_hash=token_hash(raw_token))
+    else:
+        server.credential.token_hash = token_hash(raw_token)
+        server.credential.created_at = datetime.now(timezone.utc)
+    db.commit()
+    return AgentRegistrationRead(server_id=server.id, agent_token=raw_token)
 
 
 ALERT_RULES = {
@@ -95,10 +132,16 @@ def list_alerts(active_only: bool = True, db: Session = Depends(get_db)) -> list
 
 
 @app.post("/api/v1/servers/{server_id}/metrics", response_model=MetricRead, status_code=status.HTTP_201_CREATED)
-def create_metric(server_id: UUID, payload: MetricCreate, db: Session = Depends(get_db)) -> Metric:
+def create_metric(
+    server_id: UUID,
+    payload: MetricCreate,
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+) -> Metric:
     server = db.get(Server, server_id)
     if server is None:
         raise HTTPException(status_code=404, detail="Serveur introuvable.")
+    require_agent(server, authorization)
     values = payload.model_dump()
     metric = Metric(server_id=server.id, **values)
     highest = max(values.values())
