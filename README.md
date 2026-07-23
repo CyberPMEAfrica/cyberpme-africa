@@ -22,6 +22,8 @@ Le prototype permet d'enregistrer des serveurs, recevoir leurs métriques CPU, R
 
 Le dossier `agent` contient le collecteur Python. Consultez `agent/README.md` pour l'installation et l'envoi de vraies métriques.
 
+Chaque agent doit fournir `CYBERPME_ENROLLMENT_KEY` lors de son enregistrement. L'API délivre ensuite un jeton individuel exigé pour chaque envoi de métriques; le jeton brut n'est jamais stocké dans la base.
+
 ## Envoi e-mail réel
 
 La configuration SMTP se fait uniquement dans le fichier `.env`. Le mode par défaut utilise Mailpit et ne livre aucun message sur Internet. Pour un fournisseur réel, renseignez `SMTP_HOST`, `SMTP_PORT`, `SMTP_USE_TLS`, `SMTP_USERNAME`, `SMTP_PASSWORD` et `ALERT_EMAIL_FROM`, puis recréez le conteneur backend.

@@ -2,6 +2,7 @@ import os
 from uuid import uuid4
 
 os.environ["DATABASE_URL"] = "sqlite:///./cyberpme_test.db"
+os.environ["AGENT_ENROLLMENT_KEY"] = "ci-enrollment-secret"
 
 import pytest
 from fastapi.testclient import TestClient
@@ -31,16 +32,26 @@ def test_health(client: TestClient):
 
 def test_server_metrics_and_alert_lifecycle(client: TestClient):
     hostname = f"ci-server-{uuid4().hex[:8]}"
-    server_response = client.post(
-        "/api/v1/servers",
+    registration_response = client.post(
+        "/api/v1/agents/register",
         json={"name": "Serveur CI", "hostname": hostname, "ip_address": "127.0.0.1"},
+        headers={"X-Enrollment-Key": "ci-enrollment-secret"},
     )
-    assert server_response.status_code == 201
-    server_id = server_response.json()["id"]
+    assert registration_response.status_code == 200
+    registration = registration_response.json()
+    server_id = registration["server_id"]
+    auth_headers = {"Authorization": f"Bearer {registration['agent_token']}"}
+
+    unauthorized_response = client.post(
+        f"/api/v1/servers/{server_id}/metrics",
+        json={"cpu_percent": 95, "memory_percent": 80, "disk_percent": 40},
+    )
+    assert unauthorized_response.status_code == 401
 
     critical_response = client.post(
         f"/api/v1/servers/{server_id}/metrics",
         json={"cpu_percent": 95, "memory_percent": 80, "disk_percent": 40},
+        headers=auth_headers,
     )
     assert critical_response.status_code == 201
 
@@ -53,6 +64,7 @@ def test_server_metrics_and_alert_lifecycle(client: TestClient):
     recovery_response = client.post(
         f"/api/v1/servers/{server_id}/metrics",
         json={"cpu_percent": 30, "memory_percent": 45, "disk_percent": 40},
+        headers=auth_headers,
     )
     assert recovery_response.status_code == 201
     assert client.get("/api/v1/alerts").json() == []
