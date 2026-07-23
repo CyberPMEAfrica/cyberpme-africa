@@ -9,6 +9,26 @@ permissions:
   contents: read
 
 jobs:
+  agent:
+    name: Agent Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Installer l’agent
+        run: pip install -e './agent[dev]'
+      - name: Tester l’agent
+        working-directory: agent
+        run: pytest -q
+
   backend:
     name: Tests backend
     runs-on: ubuntu-latest

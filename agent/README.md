@@ -1,6 +1,6 @@
 # Agent CyberPME
 
-L'agent collecte le CPU, la mémoire et l'espace disque d'une machine, s'enregistre auprès de l'API et envoie une mesure toutes les 60 secondes.
+L'agent collecte le CPU, la mémoire et l'espace disque d'une machine, s'enregistre auprès de l'API et envoie une mesure toutes les 60 secondes. Il est compatible avec Python 3.10 à 3.13, notamment Python 3.12 fourni par Ubuntu Server 24.04.
 
 ## Installation Windows
 
