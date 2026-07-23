@@ -1,0 +1,14 @@
+.alerts { margin-top: 56px; }
+.alert-list { display: grid; gap: 12px; }
+.alert-card { border-left: 4px solid #ffc857; }
+.alert-card.critical { border-left-color: #ff6b73; }
+.alert-top { display: flex; justify-content: space-between; }
+.alert-top span { color: #ffc857; font-size: 10px; font-weight: 800; letter-spacing: 2px; }
+.alert-card.critical .alert-top span { color: #ff6b73; }
+.alert-top small { color: #7895a5; }
+.alert-card h3 { margin: 14px 0 8px; font-size: 17px; }
+.alert-card p { margin: 0; color: #9bb0bc; }
+.all-clear { display: flex; align-items: center; gap: 16px; padding: 22px; background: #0d2b2d; border: 1px solid #1c5147; border-radius: 14px; }
+.all-clear > span { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%; color: #062015; background: #2de0a7; font-weight: 800; }
+.all-clear h3, .all-clear p { margin: 0; }
+.all-clear p { margin-top: 4px; color: #86a7a0; }

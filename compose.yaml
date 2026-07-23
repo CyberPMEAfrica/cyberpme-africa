@@ -1,0 +1,44 @@
+services:
+  database:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cyberpme}
+      POSTGRES_USER: ${POSTGRES_USER:-cyberpme}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-in-production}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://cyberpme:change-me-in-production@database:5432/cyberpme}
+      SMTP_HOST: ${SMTP_HOST:-mailpit}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-false}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      ALERT_EMAIL_FROM: ${ALERT_EMAIL_FROM:-alerts@cyberpme.local}
+      ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-bocorodrigue43@mail.com}
+    ports: ["8000:8000"]
+    depends_on:
+      database:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+    ports: ["5173:80"]
+    depends_on: [backend]
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "8025:8025"
+volumes:
+  postgres_data:
