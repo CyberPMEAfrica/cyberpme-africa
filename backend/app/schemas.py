@@ -116,3 +116,26 @@ class BackupCheckRead(BackupCheckCreate):
     server_name: str = ""
     status: str
     checked_at: datetime
+
+
+class SecurityEventCreate(BaseModel):
+    event_key: str = Field(min_length=1, max_length=128)
+    source: str = Field(pattern="^(wazuh|suricata|agent|other)$")
+    category: str = Field(min_length=2, max_length=50)
+    severity: str = Field(pattern="^(low|medium|high|critical)$")
+    title: str = Field(min_length=2, max_length=200)
+    description: str = Field(min_length=1, max_length=4000)
+    source_ip: str | None = Field(default=None, max_length=45)
+    destination_ip: str | None = Field(default=None, max_length=45)
+    rule_id: str | None = Field(default=None, max_length=80)
+    occurred_at: datetime
+
+
+class SecurityEventRead(SecurityEventCreate):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    server_id: UUID
+    server_name: str = ""
+    recommendation: str
+    status: str
+    received_at: datetime

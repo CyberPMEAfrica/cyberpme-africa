@@ -142,3 +142,28 @@ def test_backup_checks_require_agent_and_evaluate_freshness(client: TestClient):
     response = client.post(endpoint, json=stale, headers={"Authorization": f"Bearer {registration['agent_token']}"})
     assert response.json()["status"] == "critical"
     assert len(client.get("/api/v1/backup-checks").json()) == 2
+
+
+def test_security_event_ingestion_is_authenticated_and_idempotent(client: TestClient):
+    registration = client.post(
+        "/api/v1/agents/register",
+        json={"name": "Capteur IDS", "hostname": f"ids-{uuid4().hex}", "ip_address": "10.0.2.15"},
+        headers={"X-Enrollment-Key": "ci-enrollment-secret"},
+    ).json()
+    endpoint = f"/api/v1/servers/{registration['server_id']}/security-events"
+    payload = {
+        "event_key": "wazuh-100001", "source": "wazuh", "category": "authentication",
+        "severity": "high", "title": "Échecs de connexion répétés",
+        "description": "Plusieurs tentatives SSH ont échoué.", "source_ip": "192.168.1.50",
+        "destination_ip": "10.0.2.15", "rule_id": "5710",
+        "occurred_at": datetime.now(timezone.utc).isoformat(),
+    }
+    assert client.post(endpoint, json=payload).status_code == 401
+    headers = {"Authorization": f"Bearer {registration['agent_token']}"}
+    created = client.post(endpoint, json=payload, headers=headers)
+    duplicate = client.post(endpoint, json=payload, headers=headers)
+    assert created.status_code == 201
+    assert created.json()["id"] == duplicate.json()["id"]
+    assert created.json()["server_name"] == "Capteur IDS"
+    assert "multifacteur" in created.json()["recommendation"]
+    assert len(client.get("/api/v1/security-events").json()) == 1
