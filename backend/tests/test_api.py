@@ -3,6 +3,7 @@ from uuid import uuid4
 
 os.environ["DATABASE_URL"] = "sqlite:///./cyberpme_test.db"
 os.environ["AGENT_ENROLLMENT_KEY"] = "ci-enrollment-secret"
+os.environ["NETWORK_SCAN_KEY"] = "ci-network-scan-secret"
 
 import pytest
 from fastapi.testclient import TestClient
@@ -72,3 +73,25 @@ def test_server_metrics_and_alert_lifecycle(client: TestClient):
     history = client.get("/api/v1/alerts?active_only=false").json()
     assert len(history) == 2
     assert all(alert["status"] == "resolved" for alert in history)
+
+
+def test_network_scan_requires_key_and_private_limited_target(client: TestClient, monkeypatch):
+    unauthorized = client.post("/api/v1/network-scans", json={"target": "192.168.1.0/24"})
+    assert unauthorized.status_code == 401
+
+    headers = {"X-Scan-Key": "ci-network-scan-secret"}
+    public_target = client.post("/api/v1/network-scans", json={"target": "8.8.8.0/24"}, headers=headers)
+    assert public_target.status_code == 422
+
+    large_target = client.post("/api/v1/network-scans", json={"target": "10.0.0.0/16"}, headers=headers)
+    assert large_target.status_code == 422
+
+    monkeypatch.setattr("app.main.run_network_scan", lambda _: None)
+    accepted = client.post("/api/v1/network-scans", json={"target": "192.168.1.0/24"}, headers=headers)
+    assert accepted.status_code == 202
+    assert accepted.json()["target"] == "192.168.1.0/24"
+    assert accepted.json()["status"] == "pending"
+
+    history = client.get("/api/v1/network-scans")
+    assert history.status_code == 200
+    assert len(history.json()) == 1

@@ -2,6 +2,8 @@ import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 import "./alerts.css";
+import "./scanner.css";
+import NetworkScanner from "./NetworkScanner";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 const labels = { unknown: "En attente", online: "Opérationnel", warning: "Attention", critical: "Critique" };
@@ -13,6 +15,7 @@ function Metric({ label, value }) {
 function App() {
   const [servers, setServers] = useState([]);
   const [alerts, setAlerts] = useState([]);
+  const [networkScans, setNetworkScans] = useState([]);
   const [error, setError] = useState("");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState(null);
@@ -20,9 +23,17 @@ function App() {
   async function loadData() {
     setIsRefreshing(true);
     try {
-      const [serverResponse, alertResponse] = await Promise.all([fetch(`${API_URL}/api/v1/servers`), fetch(`${API_URL}/api/v1/alerts`)]);
-      if (!serverResponse.ok || !alertResponse.ok) throw new Error();
-      setServers(await serverResponse.json()); setAlerts(await alertResponse.json()); setError(""); setLastUpdated(new Date());
+      const [serverResponse, alertResponse, scanResponse] = await Promise.all([
+        fetch(`${API_URL}/api/v1/servers`),
+        fetch(`${API_URL}/api/v1/alerts`),
+        fetch(`${API_URL}/api/v1/network-scans`),
+      ]);
+      if (!serverResponse.ok || !alertResponse.ok || !scanResponse.ok) throw new Error();
+      setServers(await serverResponse.json());
+      setAlerts(await alertResponse.json());
+      setNetworkScans(await scanResponse.json());
+      setError("");
+      setLastUpdated(new Date());
     } catch { setError("Impossible de joindre l’API. Vérifiez Docker."); }
     finally { setIsRefreshing(false); }
   }
@@ -39,6 +50,7 @@ function App() {
     <section className="alerts"><div className="title"><div><p className="eyebrow">INCIDENTS</p><h2>Alertes actives</h2></div></div>
       {!alerts.length ? <div className="all-clear"><span>✓</span><div><h3>Aucune alerte active</h3><p>Les ressources surveillées sont sous les seuils configurés.</p></div></div> : <div className="alert-list">{alerts.map((alert) => <article className={`alert-card ${alert.severity}`} key={alert.id}><div className="alert-top"><span>{alert.severity === "critical" ? "CRITIQUE" : "ATTENTION"}</span><small>{alert.server_name}</small></div><h3>{alert.message}</h3><p>{alert.recommendation}</p></article>)}</div>}
     </section>
+    <NetworkScanner apiUrl={API_URL} scans={networkScans} onCreated={loadData} />
   </main>;
 }
 createRoot(document.getElementById("root")).render(<React.StrictMode><App /></React.StrictMode>);

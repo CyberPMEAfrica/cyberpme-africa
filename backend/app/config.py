@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     alert_email_from: str = "alerts@cyberpme.local"
     alert_email_to: str = "bocorodrigue43@mail.com"
     agent_enrollment_key: str
+    network_scan_key: str
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

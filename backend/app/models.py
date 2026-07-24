@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
-from sqlalchemy import DateTime, Float, ForeignKey, String, Text
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
@@ -55,3 +55,15 @@ class AgentCredential(Base):
     token_hash: Mapped[str] = mapped_column(String(64), unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     server: Mapped[Server] = relationship(back_populates="credential")
+
+
+class NetworkScan(Base):
+    __tablename__ = "network_scans"
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    target: Mapped[str] = mapped_column(String(64), index=True)
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    results: Mapped[list[dict]] = mapped_column(JSON, default=list)
+    error: Mapped[str | None] = mapped_column(Text)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -52,3 +52,24 @@ class AgentRegistration(ServerCreate):
 class AgentRegistrationRead(BaseModel):
     server_id: UUID
     agent_token: str
+
+
+class NetworkScanCreate(BaseModel):
+    target: str = Field(
+        min_length=9,
+        max_length=18,
+        examples=["192.168.1.0/24"],
+        description="Réseau IPv4 privé autorisé, limité à 256 adresses.",
+    )
+
+
+class NetworkScanRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    target: str
+    status: str
+    results: list[dict]
+    error: str | None
+    requested_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None
