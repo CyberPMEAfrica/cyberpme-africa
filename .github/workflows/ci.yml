@@ -73,6 +73,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       AGENT_ENROLLMENT_KEY: ci-enrollment-secret
+      NETWORK_SCAN_KEY: ci-network-scan-secret
     steps:
       - name: Récupérer le code
         uses: actions/checkout@v4
