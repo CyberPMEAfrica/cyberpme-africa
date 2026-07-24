@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import Base, engine, get_db
 from app.email_notifications import send_alert_email
-from app.models import AgentCredential, Alert, BackupCheck, Metric, NetworkScan, Server, SslCheck
+from app.models import AgentCredential, Alert, BackupCheck, Metric, NetworkScan, SecurityEvent, Server, SslCheck
 from app.network_scanner import run_network_scan, validate_private_target
 from app.network_report import build_network_scan_pdf
 from app.schemas import (
@@ -27,6 +27,8 @@ from app.schemas import (
     MetricRead,
     NetworkScanCreate,
     NetworkScanRead,
+    SecurityEventCreate,
+    SecurityEventRead,
     ServerCreate,
     ServerRead,
     SslCheckCreate,
@@ -67,6 +69,20 @@ def backup_response(db: Session, check: BackupCheck) -> BackupCheckRead:
     data = BackupCheckRead.model_validate(check)
     server = db.get(Server, check.server_id)
     return data.model_copy(update={"server_name": server.name if server else ""})
+
+
+def security_event_response(db: Session, event: SecurityEvent) -> SecurityEventRead:
+    data = SecurityEventRead.model_validate(event)
+    server = db.get(Server, event.server_id)
+    return data.model_copy(update={"server_name": server.name if server else ""})
+
+
+SECURITY_RECOMMENDATIONS = {
+    "authentication": "Vérifiez le compte ciblé, changez les identifiants compromis et activez l’authentification multifacteur.",
+    "malware": "Isolez la machine concernée, lancez une analyse antivirus complète et conservez les éléments de preuve.",
+    "network": "Vérifiez les flux réseau et les ports concernés. Ne bloquez l’adresse source qu’après validation.",
+    "vulnerability": "Confirmez la vulnérabilité, appliquez le correctif disponible et limitez temporairement l’exposition du service.",
+}
 
 
 @app.get("/")
@@ -278,6 +294,37 @@ def create_backup_check(
 def list_backup_checks(db: Session = Depends(get_db)) -> list[BackupCheckRead]:
     checks = db.scalars(select(BackupCheck).order_by(BackupCheck.checked_at.desc()).limit(200)).all()
     return [backup_response(db, check) for check in checks]
+
+
+@app.post("/api/v1/servers/{server_id}/security-events", response_model=SecurityEventRead, status_code=status.HTTP_201_CREATED)
+def create_security_event(
+    server_id: UUID,
+    payload: SecurityEventCreate,
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+) -> SecurityEventRead:
+    server = db.get(Server, server_id)
+    if server is None:
+        raise HTTPException(status_code=404, detail="Serveur introuvable.")
+    require_agent(server, authorization)
+    existing = db.scalar(select(SecurityEvent).where(SecurityEvent.server_id == server.id, SecurityEvent.event_key == payload.event_key))
+    if existing:
+        return security_event_response(db, existing)
+    recommendation = SECURITY_RECOMMENDATIONS.get(
+        payload.category.lower(),
+        "Analysez l’événement, confirmez son origine et documentez toute action avant d’appliquer un blocage.",
+    )
+    event = SecurityEvent(server_id=server.id, recommendation=recommendation, **payload.model_dump())
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+    return security_event_response(db, event)
+
+
+@app.get("/api/v1/security-events", response_model=list[SecurityEventRead])
+def list_security_events(db: Session = Depends(get_db)) -> list[SecurityEventRead]:
+    events = db.scalars(select(SecurityEvent).order_by(SecurityEvent.occurred_at.desc()).limit(500)).all()
+    return [security_event_response(db, event) for event in events]
 
 
 @app.post("/api/v1/servers/{server_id}/metrics", response_model=MetricRead, status_code=status.HTTP_201_CREATED)

@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, String, Text
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
@@ -101,3 +101,23 @@ class BackupCheck(Base):
     max_age_hours: Mapped[int]
     error: Mapped[str | None] = mapped_column(Text)
     checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class SecurityEvent(Base):
+    __tablename__ = "security_events"
+    __table_args__ = (UniqueConstraint("server_id", "event_key", name="uq_security_event_server_key"),)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    server_id: Mapped[UUID] = mapped_column(ForeignKey("servers.id", ondelete="CASCADE"), index=True)
+    event_key: Mapped[str] = mapped_column(String(128))
+    source: Mapped[str] = mapped_column(String(30), index=True)
+    category: Mapped[str] = mapped_column(String(50), index=True)
+    severity: Mapped[str] = mapped_column(String(20), index=True)
+    title: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str] = mapped_column(Text)
+    source_ip: Mapped[str | None] = mapped_column(String(45), index=True)
+    destination_ip: Mapped[str | None] = mapped_column(String(45))
+    rule_id: Mapped[str | None] = mapped_column(String(80))
+    recommendation: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), default="active", index=True)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

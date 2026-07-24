@@ -20,7 +20,7 @@ const navigation = [
   { id: "ssl", label: "Certificats SSL" },
   { id: "reports", label: "Rapports" },
   { id: "backups", label: "Sauvegardes" },
-  { id: "ids", label: "IDS / IPS", upcoming: true },
+  { id: "ids", label: "IDS / IPS" },
   { id: "settings", label: "Paramètres" },
 ];
 
@@ -47,14 +47,10 @@ export default function AppShell({ activePage, onNavigate, apiOnline, isRefreshi
         <div className="sidebar-brand"><b>CA</b><div><strong>CyberPME</strong><small>AFRICA</small></div></div>
         <nav aria-label="Navigation principale">
           <p>SUPERVISION</p>
-          {navigation.slice(0, 7).map((item) => (
+          {navigation.slice(0, 8).map((item) => (
             <button key={item.id} className={activePage === item.id ? "active" : ""} onClick={() => navigate(item.id)}>
               <NavIcon name={item.id}/><span>{item.label}</span>
             </button>
-          ))}
-          <p>PROCHAINEMENT</p>
-          {navigation.slice(7, 8).map((item) => (
-            <button key={item.id} disabled><NavIcon name={item.id}/><span>{item.label}</span><em>Bientôt</em></button>
           ))}
           <p>COMPTE</p>
           <button className={activePage === "settings" ? "active" : ""} onClick={() => navigate("settings")}>
