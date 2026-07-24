@@ -37,6 +37,19 @@ NETWORK_SCAN_KEY=une-longue-cle-secrete-differente
 
 Le lancement d'un audit exige cette clé et une confirmation explicite d'autorisation dans le dashboard. N'analysez jamais un réseau sans l'accord de son propriétaire.
 
+## Surveillance SSL/TLS
+
+Le dashboard permet également de vérifier les certificats des domaines publics :
+
+- date de début et d'expiration ;
+- nombre de jours restants ;
+- validation de la chaîne de confiance et du nom de domaine ;
+- version TLS et algorithme de chiffrement négocié ;
+- état valide, expiration proche, expiré ou non fiable ;
+- historique des contrôles dans PostgreSQL.
+
+Par sécurité, le contrôle refuse les adresses IP, les résolutions privées et les ports autres que `443` et `8443`. Le lancement utilise la même clé locale `NETWORK_SCAN_KEY` que les autres audits de sécurité.
+
 ## Agent de monitoring
 
 Le dossier `agent` contient le collecteur Python. Consultez `agent/README.md` pour l'installation et l'envoi de vraies métriques.

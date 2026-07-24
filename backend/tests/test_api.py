@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 os.environ["DATABASE_URL"] = "sqlite:///./cyberpme_test.db"
@@ -93,5 +94,37 @@ def test_network_scan_requires_key_and_private_limited_target(client: TestClient
     assert accepted.json()["status"] == "pending"
 
     history = client.get("/api/v1/network-scans")
+    assert history.status_code == 200
+    assert len(history.json()) == 1
+
+
+def test_ssl_check_requires_key_and_records_result(client: TestClient, monkeypatch):
+    unauthorized = client.post("/api/v1/ssl-checks", json={"hostname": "example.com", "port": 443})
+    assert unauthorized.status_code == 401
+
+    headers = {"X-Scan-Key": "ci-network-scan-secret"}
+    monkeypatch.setattr("app.main.validate_public_hostname", lambda hostname, port: ("example.com", ["93.184.216.34"]))
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr(
+        "app.main.inspect_certificate",
+        lambda hostname, port: {
+            "status": "valid",
+            "subject": "example.com",
+            "issuer": "Example CA",
+            "valid_from": now - timedelta(days=30),
+            "expires_at": now + timedelta(days=60),
+            "days_remaining": 59,
+            "chain_valid": True,
+            "tls_version": "TLSv1.3",
+            "cipher": "TLS_AES_256_GCM_SHA384",
+            "error": None,
+        },
+    )
+    response = client.post("/api/v1/ssl-checks", json={"hostname": "example.com", "port": 443}, headers=headers)
+    assert response.status_code == 201
+    assert response.json()["status"] == "valid"
+    assert response.json()["days_remaining"] == 59
+
+    history = client.get("/api/v1/ssl-checks")
     assert history.status_code == 200
     assert len(history.json()) == 1
