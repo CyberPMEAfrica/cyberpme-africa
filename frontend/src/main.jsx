@@ -3,7 +3,11 @@ import { createRoot } from "react-dom/client";
 import "./styles.css";
 import "./alerts.css";
 import "./scanner.css";
+import "./shell.css";
+import AppShell, { activePages } from "./AppShell";
 import NetworkScanner from "./NetworkScanner";
+import ReportsPage from "./ReportsPage";
+import SettingsPage from "./SettingsPage";
 import SslMonitor from "./SslMonitor";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
@@ -13,7 +17,59 @@ function Metric({ label, value }) {
   return <div className="metric"><span>{label}</span><strong>{value == null ? "—" : `${Math.round(value)} %`}</strong></div>;
 }
 
+function ServerCards({ servers, error, limit }) {
+  const displayed = limit ? servers.slice(0, limit) : servers;
+  if (!displayed.length && !error) {
+    return <div className="empty"><h3>Aucun serveur enregistré</h3><p>Ajoutez le premier serveur depuis la documentation interactive.</p><a href={`${API_URL}/docs`}>Ouvrir l’API</a></div>;
+  }
+  return <div className="grid">{displayed.map((server) => (
+    <article key={server.id}>
+      <div className="server-head"><div><h3>{server.name}</h3><p>{server.hostname}{server.ip_address ? ` · ${server.ip_address}` : ""}</p></div><em className={`status ${server.status}`}>{labels[server.status]}</em></div>
+      <div className="metrics"><Metric label="CPU" value={server.latest_metric?.cpu_percent}/><Metric label="RAM" value={server.latest_metric?.memory_percent}/><Metric label="Disque" value={server.latest_metric?.disk_percent}/></div>
+    </article>
+  ))}</div>;
+}
+
+function AlertCards({ alerts, limit }) {
+  const displayed = limit ? alerts.slice(0, limit) : alerts;
+  if (!displayed.length) {
+    return <div className="all-clear"><span>✓</span><div><h3>Aucune alerte active</h3><p>Les ressources surveillées sont sous les seuils configurés.</p></div></div>;
+  }
+  return <div className="alert-list">{displayed.map((alert) => (
+    <article className={`alert-card ${alert.severity}`} key={alert.id}>
+      <div className="alert-top"><span>{alert.severity === "critical" ? "CRITIQUE" : "ATTENTION"}</span><small>{alert.server_name}</small></div>
+      <h3>{alert.message}</h3><p>{alert.recommendation}</p>
+    </article>
+  ))}</div>;
+}
+
+function OverviewPage({ servers, alerts, error }) {
+  const active = servers.filter((server) => server.status === "online").length;
+  return <>
+    <section className="overview-hero"><p className="eyebrow">CENTRE DE SUPERVISION</p><h2>Vos systèmes, sous contrôle.</h2><p>Une vue claire et immédiate de la santé de votre infrastructure.</p></section>
+    <section className="summary overview-summary"><div><span>Serveurs suivis</span><strong>{servers.length}</strong></div><div><span>Opérationnels</span><strong className="green">{active}</strong></div><div><span>Alertes actives</span><strong className={alerts.length ? "red" : "green"}>{alerts.length}</strong></div></section>
+    <div className="overview-columns">
+      <section className="overview-block"><p className="eyebrow">INFRASTRUCTURE</p><h2>État récent</h2><ServerCards servers={servers} error={error} limit={3}/></section>
+      <section className="overview-block"><p className="eyebrow">INCIDENTS</p><h2>Priorités</h2><AlertCards alerts={alerts} limit={3}/></section>
+    </div>
+  </>;
+}
+
+function ServersPage({ servers, error }) {
+  return <section className="page-section"><div className="page-heading"><div><p className="eyebrow">INFRASTRUCTURE</p><h2>Serveurs supervisés</h2><p>État et ressources des agents CyberPME enregistrés.</p></div></div><ServerCards servers={servers} error={error}/></section>;
+}
+
+function AlertsPage({ alerts }) {
+  return <section className="page-section"><div className="page-heading"><div><p className="eyebrow">INCIDENTS</p><h2>Alertes actives</h2><p>Incidents nécessitant une attention et recommandations associées.</p></div></div><AlertCards alerts={alerts}/></section>;
+}
+
+function pageFromHash() {
+  const requested = window.location.hash.replace("#/", "");
+  return activePages.includes(requested) ? requested : "overview";
+}
+
 function App() {
+  const [activePage, setActivePage] = useState(pageFromHash);
   const [servers, setServers] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [networkScans, setNetworkScans] = useState([]);
@@ -38,24 +94,39 @@ function App() {
       setSslChecks(await sslResponse.json());
       setError("");
       setLastUpdated(new Date());
-    } catch { setError("Impossible de joindre l’API. Vérifiez Docker."); }
-    finally { setIsRefreshing(false); }
+    } catch {
+      setError("Impossible de joindre l’API. Vérifiez Docker.");
+    } finally {
+      setIsRefreshing(false);
+    }
   }
-  useEffect(() => { loadData(); const timer = setInterval(loadData, 10000); return () => clearInterval(timer); }, []);
-  const active = servers.filter((server) => server.status === "online").length;
-  return <main>
-    <header><div className="brand"><b>CA</b><div><strong>CyberPME</strong><small>AFRICA</small></div></div><button onClick={loadData} disabled={isRefreshing} aria-busy={isRefreshing}>{isRefreshing ? "Actualisation..." : "Actualiser"}</button></header>
-    <section className="hero"><p className="eyebrow">CENTRE DE SUPERVISION</p><h1>Vos systèmes, sous contrôle.</h1><p>Une vue claire et immédiate de la santé de votre infrastructure.</p></section>
-    <section className="summary"><div><span>Serveurs suivis</span><strong>{servers.length}</strong></div><div><span>Opérationnels</span><strong className="green">{active}</strong></div><div><span>Alertes actives</span><strong className={alerts.length ? "red" : "green"}>{alerts.length}</strong></div></section>
+
+  function navigate(page) {
+    window.location.hash = `/${page}`;
+  }
+
+  useEffect(() => {
+    const handleHash = () => setActivePage(pageFromHash());
+    window.addEventListener("hashchange", handleHash);
+    if (!window.location.hash) window.history.replaceState(null, "", "#/overview");
+    loadData();
+    const timer = setInterval(loadData, 10000);
+    return () => { window.removeEventListener("hashchange", handleHash); clearInterval(timer); };
+  }, []);
+
+  let page;
+  if (activePage === "servers") page = <ServersPage servers={servers} error={error}/>;
+  else if (activePage === "alerts") page = <AlertsPage alerts={alerts}/>;
+  else if (activePage === "scanner") page = <NetworkScanner apiUrl={API_URL} scans={networkScans} onCreated={loadData}/>;
+  else if (activePage === "ssl") page = <SslMonitor apiUrl={API_URL} checks={sslChecks} onCreated={loadData}/>;
+  else if (activePage === "reports") page = <ReportsPage apiUrl={API_URL} scans={networkScans}/>;
+  else if (activePage === "settings") page = <SettingsPage apiUrl={API_URL}/>;
+  else page = <OverviewPage servers={servers} alerts={alerts} error={error}/>;
+
+  return <AppShell activePage={activePage} onNavigate={navigate} apiOnline={!error} isRefreshing={isRefreshing} lastUpdated={lastUpdated} onRefresh={loadData}>
     {error && <p className="error">{error}</p>}
-    <section className="servers"><div className="title"><div><p className="eyebrow">INFRASTRUCTURE</p><h2>Serveurs</h2></div><small aria-live="polite">{lastUpdated ? `Dernière mise à jour à ${lastUpdated.toLocaleTimeString("fr-FR")}` : "Chargement des données..."}</small></div>
-      {!servers.length && !error ? <div className="empty"><h3>Aucun serveur enregistré</h3><p>Ajoutez le premier serveur depuis la documentation interactive.</p><a href={`${API_URL}/docs`}>Ouvrir l’API</a></div> : <div className="grid">{servers.map((server) => <article key={server.id}><div className="server-head"><div><h3>{server.name}</h3><p>{server.hostname}{server.ip_address ? ` · ${server.ip_address}` : ""}</p></div><em className={`status ${server.status}`}>{labels[server.status]}</em></div><div className="metrics"><Metric label="CPU" value={server.latest_metric?.cpu_percent}/><Metric label="RAM" value={server.latest_metric?.memory_percent}/><Metric label="Disque" value={server.latest_metric?.disk_percent}/></div></article>)}</div>}
-    </section>
-    <section className="alerts"><div className="title"><div><p className="eyebrow">INCIDENTS</p><h2>Alertes actives</h2></div></div>
-      {!alerts.length ? <div className="all-clear"><span>✓</span><div><h3>Aucune alerte active</h3><p>Les ressources surveillées sont sous les seuils configurés.</p></div></div> : <div className="alert-list">{alerts.map((alert) => <article className={`alert-card ${alert.severity}`} key={alert.id}><div className="alert-top"><span>{alert.severity === "critical" ? "CRITIQUE" : "ATTENTION"}</span><small>{alert.server_name}</small></div><h3>{alert.message}</h3><p>{alert.recommendation}</p></article>)}</div>}
-    </section>
-    <NetworkScanner apiUrl={API_URL} scans={networkScans} onCreated={loadData} />
-    <SslMonitor apiUrl={API_URL} checks={sslChecks} onCreated={loadData} />
-  </main>;
+    {page}
+  </AppShell>;
 }
-createRoot(document.getElementById("root")).render(<React.StrictMode><App /></React.StrictMode>);
+
+createRoot(document.getElementById("root")).render(<React.StrictMode><App/></React.StrictMode>);
