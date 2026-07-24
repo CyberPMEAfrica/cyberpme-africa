@@ -67,3 +67,21 @@ class NetworkScan(Base):
     requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class SslCheck(Base):
+    __tablename__ = "ssl_checks"
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    hostname: Mapped[str] = mapped_column(String(253), index=True)
+    port: Mapped[int]
+    status: Mapped[str] = mapped_column(String(20), index=True)
+    subject: Mapped[str | None] = mapped_column(String(500))
+    issuer: Mapped[str | None] = mapped_column(String(500))
+    valid_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    days_remaining: Mapped[int | None]
+    chain_valid: Mapped[bool] = mapped_column(default=False)
+    tls_version: Mapped[str | None] = mapped_column(String(30))
+    cipher: Mapped[str | None] = mapped_column(String(100))
+    error: Mapped[str | None] = mapped_column(Text)
+    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

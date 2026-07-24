@@ -73,3 +73,26 @@ class NetworkScanRead(BaseModel):
     requested_at: datetime
     started_at: datetime | None
     completed_at: datetime | None
+
+
+class SslCheckCreate(BaseModel):
+    hostname: str = Field(min_length=4, max_length=253, examples=["example.com"])
+    port: int = Field(default=443)
+
+
+class SslCheckRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    hostname: str
+    port: int
+    status: str
+    subject: str | None
+    issuer: str | None
+    valid_from: datetime | None
+    expires_at: datetime | None
+    days_remaining: int | None
+    chain_valid: bool
+    tls_version: str | None
+    cipher: str | None
+    error: str | None
+    checked_at: datetime

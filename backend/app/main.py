@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 import hashlib
 import hmac
 import secrets
+import ssl
 from uuid import UUID
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import Base, engine, get_db
 from app.email_notifications import send_alert_email
-from app.models import AgentCredential, Alert, Metric, NetworkScan, Server
+from app.models import AgentCredential, Alert, Metric, NetworkScan, Server, SslCheck
 from app.network_scanner import run_network_scan, validate_private_target
 from app.network_report import build_network_scan_pdf
 from app.schemas import (
@@ -26,7 +27,10 @@ from app.schemas import (
     NetworkScanRead,
     ServerCreate,
     ServerRead,
+    SslCheckCreate,
+    SslCheckRead,
 )
+from app.ssl_monitor import inspect_certificate, validate_public_hostname
 
 
 @asynccontextmanager
@@ -198,6 +202,44 @@ def get_network_scan_report(scan_id: UUID, db: Session = Depends(get_db)) -> Res
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="audit-reseau-{scan.id}.pdf"'},
     )
+
+
+@app.post("/api/v1/ssl-checks", response_model=SslCheckRead, status_code=status.HTTP_201_CREATED)
+def create_ssl_check(
+    payload: SslCheckCreate,
+    x_scan_key: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+) -> SslCheck:
+    require_scan_key(x_scan_key)
+    try:
+        hostname, _ = validate_public_hostname(payload.hostname, payload.port)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    try:
+        result = inspect_certificate(hostname, payload.port)
+    except (OSError, ssl.SSLError, ValueError) as exc:
+        result = {
+            "status": "failed",
+            "subject": None,
+            "issuer": None,
+            "valid_from": None,
+            "expires_at": None,
+            "days_remaining": None,
+            "chain_valid": False,
+            "tls_version": None,
+            "cipher": None,
+            "error": str(exc),
+        }
+    check = SslCheck(hostname=hostname, port=payload.port, **result)
+    db.add(check)
+    db.commit()
+    db.refresh(check)
+    return check
+
+
+@app.get("/api/v1/ssl-checks", response_model=list[SslCheckRead])
+def list_ssl_checks(db: Session = Depends(get_db)) -> list[SslCheck]:
+    return list(db.scalars(select(SslCheck).order_by(SslCheck.checked_at.desc())).all())
 
 
 @app.post("/api/v1/servers/{server_id}/metrics", response_model=MetricRead, status_code=status.HTTP_201_CREATED)
