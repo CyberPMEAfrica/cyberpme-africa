@@ -14,13 +14,15 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import Base, engine, get_db
 from app.email_notifications import send_alert_email
-from app.models import AgentCredential, Alert, Metric, NetworkScan, Server, SslCheck
+from app.models import AgentCredential, Alert, BackupCheck, Metric, NetworkScan, Server, SslCheck
 from app.network_scanner import run_network_scan, validate_private_target
 from app.network_report import build_network_scan_pdf
 from app.schemas import (
     AgentRegistration,
     AgentRegistrationRead,
     AlertRead,
+    BackupCheckCreate,
+    BackupCheckRead,
     MetricCreate,
     MetricRead,
     NetworkScanCreate,
@@ -59,6 +61,12 @@ def require_agent(server: Server, authorization: str | None) -> None:
     supplied_hash = token_hash(authorization.removeprefix("Bearer ").strip())
     if not hmac.compare_digest(supplied_hash, server.credential.token_hash):
         raise HTTPException(status_code=401, detail="Jeton agent invalide.")
+
+
+def backup_response(db: Session, check: BackupCheck) -> BackupCheckRead:
+    data = BackupCheckRead.model_validate(check)
+    server = db.get(Server, check.server_id)
+    return data.model_copy(update={"server_name": server.name if server else ""})
 
 
 @app.get("/")
@@ -240,6 +248,36 @@ def create_ssl_check(
 @app.get("/api/v1/ssl-checks", response_model=list[SslCheckRead])
 def list_ssl_checks(db: Session = Depends(get_db)) -> list[SslCheck]:
     return list(db.scalars(select(SslCheck).order_by(SslCheck.checked_at.desc())).all())
+
+
+@app.post("/api/v1/servers/{server_id}/backup-checks", response_model=BackupCheckRead, status_code=status.HTTP_201_CREATED)
+def create_backup_check(
+    server_id: UUID,
+    payload: BackupCheckCreate,
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+) -> BackupCheckRead:
+    server = db.get(Server, server_id)
+    if server is None:
+        raise HTTPException(status_code=404, detail="Serveur introuvable.")
+    require_agent(server, authorization)
+    now = datetime.now(timezone.utc)
+    last_success = payload.last_success_at
+    if last_success and last_success.tzinfo is None:
+        last_success = last_success.replace(tzinfo=timezone.utc)
+    fresh = bool(last_success and (now - last_success).total_seconds() <= payload.max_age_hours * 3600)
+    check_status = "healthy" if payload.exists and payload.size_bytes and fresh and not payload.error else "critical"
+    check = BackupCheck(server_id=server.id, status=check_status, **payload.model_dump(exclude={"last_success_at"}), last_success_at=last_success)
+    db.add(check)
+    db.commit()
+    db.refresh(check)
+    return backup_response(db, check)
+
+
+@app.get("/api/v1/backup-checks", response_model=list[BackupCheckRead])
+def list_backup_checks(db: Session = Depends(get_db)) -> list[BackupCheckRead]:
+    checks = db.scalars(select(BackupCheck).order_by(BackupCheck.checked_at.desc()).limit(200)).all()
+    return [backup_response(db, check) for check in checks]
 
 
 @app.post("/api/v1/servers/{server_id}/metrics", response_model=MetricRead, status_code=status.HTTP_201_CREATED)

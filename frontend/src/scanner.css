@@ -49,3 +49,11 @@
 .ssl-metrics strong { font-size: 13px; }
 @media(max-width:800px){.ssl-layout{grid-template-columns:1fr}}
 @media(max-width:520px){.ssl-metrics{grid-template-columns:1fr}}
+.backup-summary { display:grid; grid-template-columns:repeat(3,1fr); margin:22px 0 16px; border:1px solid #1c3c4c; border-radius:14px; overflow:hidden; }
+.backup-summary article { display:grid; gap:8px; padding:20px; background:#0b2231; border-right:1px solid #1c3c4c; }
+.backup-summary article:last-child { border:0; }
+.backup-summary span { color:#91aab7; }
+.backup-summary strong { font-size:28px; }
+.backup-summary .good { color:#2de0a7; } .backup-summary .bad { color:#ff7b82; }
+.backup-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+@media(max-width:800px){.backup-grid{grid-template-columns:1fr}.backup-summary{grid-template-columns:1fr}.backup-summary article{border-right:0;border-bottom:1px solid #1c3c4c}}

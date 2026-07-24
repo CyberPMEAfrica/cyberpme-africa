@@ -16,6 +16,8 @@ Test avec une seule mesure :
 ```powershell
 $env:CYBERPME_SERVER_NAME="Mon PC"
 $env:CYBERPME_ENROLLMENT_KEY="votre-cle-enrolement"
+$env:CYBERPME_FILE_BACKUPS="Documents|D:\Sauvegardes\Documents|24"
+$env:CYBERPME_POSTGRES_BACKUPS="Base CyberPME|D:\Sauvegardes\PostgreSQL|24"
 .\.venv-agent\Scripts\cyberpme-agent.exe --once
 ```
 

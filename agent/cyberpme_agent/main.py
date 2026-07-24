@@ -5,6 +5,7 @@ import platform
 import socket
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -20,16 +21,25 @@ class Config:
     hostname: str
     interval: int
     enrollment_key: str
+    backup_targets: tuple[tuple[str, str, str, int], ...]
 
     @classmethod
     def from_environment(cls, interval_override: int | None = None) -> "Config":
         hostname = os.getenv("CYBERPME_HOSTNAME", socket.gethostname())
+        targets = []
+        for kind, variable in (("files", "CYBERPME_FILE_BACKUPS"), ("postgresql", "CYBERPME_POSTGRES_BACKUPS")):
+            for item in filter(None, os.getenv(variable, "").split(";")):
+                parts = item.split("|")
+                if len(parts) != 3:
+                    raise ValueError(f"{variable}: format attendu nom|chemin|heures.")
+                targets.append((kind, parts[0].strip(), parts[1].strip(), int(parts[2])))
         return cls(
             api_url=os.getenv("CYBERPME_API_URL", "http://localhost:8000").rstrip("/"),
             name=os.getenv("CYBERPME_SERVER_NAME", hostname),
             hostname=hostname,
             interval=interval_override or int(os.getenv("CYBERPME_INTERVAL", "60")),
             enrollment_key=os.getenv("CYBERPME_ENROLLMENT_KEY", ""),
+            backup_targets=tuple(targets),
         )
 
 
@@ -92,15 +102,49 @@ def send_once(config: Config, server_id: str, agent_token: str) -> dict[str, Any
     return result
 
 
+def inspect_backup(kind: str, name: str, source: str, max_age_hours: int) -> dict[str, Any]:
+    path = Path(source).expanduser()
+    try:
+        candidates = [path] if path.is_file() else [item for item in path.rglob("*") if item.is_file()] if path.is_dir() else []
+        if kind == "postgresql":
+            candidates = [item for item in candidates if item.suffix.lower() in {".sql", ".dump", ".backup", ".gz"}]
+        latest = max(candidates, key=lambda item: item.stat().st_mtime) if candidates else None
+        return {
+            "name": name, "kind": kind, "source": str(path), "exists": latest is not None,
+            "size_bytes": latest.stat().st_size if latest else None,
+            "last_success_at": datetime.fromtimestamp(latest.stat().st_mtime, timezone.utc).isoformat() if latest else None,
+            "max_age_hours": max_age_hours, "error": None if latest else "Aucun fichier de sauvegarde trouvé.",
+        }
+    except OSError as exc:
+        return {
+            "name": name, "kind": kind, "source": str(path), "exists": False, "size_bytes": None,
+            "last_success_at": None, "max_age_hours": max_age_hours, "error": str(exc),
+        }
+
+
+def send_backup_checks(config: Config, server_id: str, agent_token: str) -> None:
+    for target in config.backup_targets:
+        payload = inspect_backup(*target)
+        result = request_json(
+            "POST", f"{config.api_url}/api/v1/servers/{server_id}/backup-checks", payload,
+            {"Authorization": f"Bearer {agent_token}"},
+        )
+        print(f"Sauvegarde vérifiée — {payload['name']} : {result['status']}", flush=True)
+
+
 def run(config: Config, once: bool) -> None:
     print(f"CyberPME Agent 0.1.0 — {platform.system()} {platform.release()}")
     print(f"Serveur: {config.name} ({config.hostname}) | API: {config.api_url}")
     server_id, agent_token = register_agent(config)
     print(f"Enregistrement confirmé — identifiant {server_id}")
 
+    backup_check_due = 0.0
     while True:
         try:
             send_once(config, server_id, agent_token)
+            if config.backup_targets and time.monotonic() >= backup_check_due:
+                send_backup_checks(config, server_id, agent_token)
+                backup_check_due = time.monotonic() + 3600
         except RuntimeError as exc:
             print(f"Erreur temporaire: {exc}", flush=True)
         if once:

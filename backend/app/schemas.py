@@ -96,3 +96,23 @@ class SslCheckRead(BaseModel):
     cipher: str | None
     error: str | None
     checked_at: datetime
+
+
+class BackupCheckCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+    kind: str = Field(pattern="^(files|postgresql)$")
+    source: str = Field(min_length=1, max_length=500)
+    exists: bool
+    size_bytes: int | None = Field(default=None, ge=0)
+    last_success_at: datetime | None = None
+    max_age_hours: int = Field(default=24, ge=1, le=8760)
+    error: str | None = Field(default=None, max_length=1000)
+
+
+class BackupCheckRead(BackupCheckCreate):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    server_id: UUID
+    server_name: str = ""
+    status: str
+    checked_at: datetime

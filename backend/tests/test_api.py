@@ -101,30 +101,44 @@ def test_network_scan_requires_key_and_private_limited_target(client: TestClient
 def test_ssl_check_requires_key_and_records_result(client: TestClient, monkeypatch):
     unauthorized = client.post("/api/v1/ssl-checks", json={"hostname": "example.com", "port": 443})
     assert unauthorized.status_code == 401
-
     headers = {"X-Scan-Key": "ci-network-scan-secret"}
     monkeypatch.setattr("app.main.validate_public_hostname", lambda hostname, port: ("example.com", ["93.184.216.34"]))
     now = datetime.now(timezone.utc)
     monkeypatch.setattr(
         "app.main.inspect_certificate",
         lambda hostname, port: {
-            "status": "valid",
-            "subject": "example.com",
-            "issuer": "Example CA",
-            "valid_from": now - timedelta(days=30),
-            "expires_at": now + timedelta(days=60),
-            "days_remaining": 59,
-            "chain_valid": True,
-            "tls_version": "TLSv1.3",
-            "cipher": "TLS_AES_256_GCM_SHA384",
-            "error": None,
+            "status": "valid", "subject": "example.com", "issuer": "Example CA",
+            "valid_from": now - timedelta(days=30), "expires_at": now + timedelta(days=60),
+            "days_remaining": 59, "chain_valid": True, "tls_version": "TLSv1.3",
+            "cipher": "TLS_AES_256_GCM_SHA384", "error": None,
         },
     )
     response = client.post("/api/v1/ssl-checks", json={"hostname": "example.com", "port": 443}, headers=headers)
     assert response.status_code == 201
     assert response.json()["status"] == "valid"
     assert response.json()["days_remaining"] == 59
+    assert len(client.get("/api/v1/ssl-checks").json()) == 1
 
-    history = client.get("/api/v1/ssl-checks")
-    assert history.status_code == 200
-    assert len(history.json()) == 1
+
+def test_backup_checks_require_agent_and_evaluate_freshness(client: TestClient):
+    registration = client.post(
+        "/api/v1/agents/register",
+        json={"name": "Serveur sauvegarde", "hostname": f"backup-{uuid4().hex}", "ip_address": "127.0.0.1"},
+        headers={"X-Enrollment-Key": "ci-enrollment-secret"},
+    ).json()
+    endpoint = f"/api/v1/servers/{registration['server_id']}/backup-checks"
+    payload = {
+        "name": "Documents", "kind": "files", "source": "/backups/documents",
+        "exists": True, "size_bytes": 4096,
+        "last_success_at": datetime.now(timezone.utc).isoformat(), "max_age_hours": 24,
+    }
+    assert client.post(endpoint, json=payload).status_code == 401
+    created = client.post(endpoint, json=payload, headers={"Authorization": f"Bearer {registration['agent_token']}"})
+    assert created.status_code == 201
+    assert created.json()["status"] == "healthy"
+    assert created.json()["server_name"] == "Serveur sauvegarde"
+
+    stale = payload | {"name": "PostgreSQL", "kind": "postgresql", "last_success_at": (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()}
+    response = client.post(endpoint, json=stale, headers={"Authorization": f"Bearer {registration['agent_token']}"})
+    assert response.json()["status"] == "critical"
+    assert len(client.get("/api/v1/backup-checks").json()) == 2

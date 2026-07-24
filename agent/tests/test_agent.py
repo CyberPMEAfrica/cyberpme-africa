@@ -1,4 +1,4 @@
-from cyberpme_agent.main import Config, collect_metrics
+from cyberpme_agent.main import Config, collect_metrics, inspect_backup
 
 
 def test_config_supports_ubuntu_environment(monkeypatch):
@@ -21,3 +21,18 @@ def test_collected_metrics_are_percentages():
 
     assert set(metrics) == {"cpu_percent", "memory_percent", "disk_percent"}
     assert all(0 <= value <= 100 for value in metrics.values())
+
+
+def test_inspect_backup_selects_latest_postgresql_dump(tmp_path):
+    old = tmp_path / "old.sql"
+    latest = tmp_path / "latest.dump"
+    ignored = tmp_path / "notes.txt"
+    old.write_text("old")
+    latest.write_text("database")
+    ignored.write_text("ignore")
+    old.touch()
+    latest.touch()
+    result = inspect_backup("postgresql", "Base PME", str(tmp_path), 24)
+    assert result["exists"] is True
+    assert result["size_bytes"] == len("database")
+    assert result["error"] is None
