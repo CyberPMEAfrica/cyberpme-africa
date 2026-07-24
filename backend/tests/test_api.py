@@ -5,6 +5,10 @@ from uuid import uuid4
 os.environ["DATABASE_URL"] = "sqlite:///./cyberpme_test.db"
 os.environ["AGENT_ENROLLMENT_KEY"] = "ci-enrollment-secret"
 os.environ["NETWORK_SCAN_KEY"] = "ci-network-scan-secret"
+os.environ["BOOTSTRAP_ORGANIZATION_NAME"] = "PME Test"
+os.environ["BOOTSTRAP_ORGANIZATION_SLUG"] = "pme-test"
+os.environ["BOOTSTRAP_ADMIN_EMAIL"] = "owner@example.test"
+os.environ["BOOTSTRAP_ADMIN_PASSWORD"] = "Test-password-very-strong-2026"
 
 import pytest
 from fastapi.testclient import TestClient
@@ -30,6 +34,27 @@ def test_health(client: TestClient):
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_owner_login_session_and_logout(client: TestClient):
+    credentials = {
+        "organization_slug": "pme-test",
+        "email": "owner@example.test",
+        "password": "Test-password-very-strong-2026",
+    }
+    invalid = client.post("/api/v1/auth/login", json=credentials | {"password": "wrong-password-2026"})
+    assert invalid.status_code == 401
+    login_response = client.post("/api/v1/auth/login", json=credentials)
+    assert login_response.status_code == 200
+    token = login_response.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    profile = client.get("/api/v1/auth/me", headers=headers)
+    assert profile.status_code == 200
+    assert profile.json()["organization_name"] == "PME Test"
+    assert profile.json()["role"] == "owner"
+    assert client.post("/api/v1/auth/logout", headers=headers).status_code == 204
+    assert client.get("/api/v1/auth/me", headers=headers).status_code == 401
 
 
 def test_server_metrics_and_alert_lifecycle(client: TestClient):

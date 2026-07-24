@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
 import secrets
@@ -12,9 +12,10 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.config import settings
+from app.auth import hash_password, hash_session_token, issue_session_token, verify_password
 from app.database import Base, engine, get_db
 from app.email_notifications import send_alert_email
-from app.models import AgentCredential, Alert, BackupCheck, Metric, NetworkScan, SecurityEvent, Server, SslCheck
+from app.models import AgentCredential, Alert, BackupCheck, Metric, NetworkScan, Organization, SecurityEvent, Server, SslCheck, User, UserSession
 from app.network_scanner import run_network_scan, validate_private_target
 from app.network_report import build_network_scan_pdf
 from app.schemas import (
@@ -29,6 +30,9 @@ from app.schemas import (
     NetworkScanRead,
     SecurityEventCreate,
     SecurityEventRead,
+    CurrentUserRead,
+    LoginRequest,
+    SessionRead,
     ServerCreate,
     ServerRead,
     SslCheckCreate,
@@ -40,11 +44,64 @@ from app.ssl_monitor import inspect_certificate, validate_public_hostname
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine)
+    if settings.bootstrap_admin_email and settings.bootstrap_admin_password:
+        with next(get_db()) as db:
+            organization = db.scalar(select(Organization).where(Organization.slug == settings.bootstrap_organization_slug))
+            if organization is None:
+                organization = Organization(
+                    name=settings.bootstrap_organization_name,
+                    slug=settings.bootstrap_organization_slug,
+                )
+                db.add(organization)
+                db.flush()
+            user = db.scalar(
+                select(User).where(
+                    User.organization_id == organization.id,
+                    User.email == settings.bootstrap_admin_email.lower(),
+                )
+            )
+            if user is None:
+                db.add(
+                    User(
+                        organization_id=organization.id,
+                        email=settings.bootstrap_admin_email.lower(),
+                        password_hash=hash_password(settings.bootstrap_admin_password),
+                        role="owner",
+                    )
+                )
+            db.commit()
     yield
 
 
 app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+
+def require_user(
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+) -> tuple[User, Organization]:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Authentification requise.")
+    supplied = authorization.removeprefix("Bearer ").strip()
+    session = db.scalar(select(UserSession).where(UserSession.token_hash == hash_session_token(supplied)))
+    now = datetime.now(timezone.utc)
+    if session is None:
+        raise HTTPException(status_code=401, detail="Session invalide ou expirée.")
+    expires_at = session.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at <= now:
+        db.delete(session)
+        db.commit()
+        raise HTTPException(status_code=401, detail="Session invalide ou expirée.")
+    user = db.get(User, session.user_id)
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=401, detail="Compte indisponible.")
+    organization = db.get(Organization, user.organization_id)
+    if organization is None:
+        raise HTTPException(status_code=401, detail="Organisation indisponible.")
+    return user, organization
 
 
 def server_response(db: Session, server: Server) -> ServerRead:
@@ -93,6 +150,53 @@ def root() -> dict[str, str]:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.post("/api/v1/auth/login", response_model=SessionRead)
+def login(payload: LoginRequest, db: Session = Depends(get_db)) -> SessionRead:
+    organization = db.scalar(select(Organization).where(Organization.slug == payload.organization_slug.lower()))
+    user = None
+    if organization:
+        user = db.scalar(
+            select(User).where(
+                User.organization_id == organization.id,
+                User.email == payload.email.lower(),
+            )
+        )
+    if user is None or not user.is_active or not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Identifiants invalides.")
+    raw_token, token_digest = issue_session_token()
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=12)
+    db.add(UserSession(user_id=user.id, token_hash=token_digest, expires_at=expires_at))
+    db.commit()
+    return SessionRead(access_token=raw_token, expires_at=expires_at)
+
+
+@app.get("/api/v1/auth/me", response_model=CurrentUserRead)
+def current_user(context: tuple[User, Organization] = Depends(require_user)) -> CurrentUserRead:
+    user, organization = context
+    return CurrentUserRead(
+        id=user.id,
+        organization_id=organization.id,
+        organization_name=organization.name,
+        email=user.email,
+        role=user.role,
+    )
+
+
+@app.post("/api/v1/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
+def logout(
+    authorization: str | None = Header(default=None),
+    context: tuple[User, Organization] = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    del context
+    token = authorization.removeprefix("Bearer ").strip() if authorization else ""
+    session = db.scalar(select(UserSession).where(UserSession.token_hash == hash_session_token(token)))
+    if session:
+        db.delete(session)
+        db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.post("/api/v1/servers", response_model=ServerRead, status_code=status.HTTP_201_CREATED)

@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     alert_email_to: str = "bocorodrigue43@mail.com"
     agent_enrollment_key: str
     network_scan_key: str
+    bootstrap_organization_name: str = "CyberPME Lab"
+    bootstrap_organization_slug: str = "cyberpme-lab"
+    bootstrap_admin_email: str = ""
+    bootstrap_admin_password: str = ""
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

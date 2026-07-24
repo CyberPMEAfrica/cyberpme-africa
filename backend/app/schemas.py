@@ -139,3 +139,23 @@ class SecurityEventRead(SecurityEventCreate):
     recommendation: str
     status: str
     received_at: datetime
+
+
+class LoginRequest(BaseModel):
+    organization_slug: str = Field(min_length=2, max_length=80)
+    email: str = Field(min_length=5, max_length=254)
+    password: str = Field(min_length=12, max_length=256)
+
+
+class SessionRead(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_at: datetime
+
+
+class CurrentUserRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    organization_name: str
+    email: str
+    role: str
