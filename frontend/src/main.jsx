@@ -6,6 +6,7 @@ import "./scanner.css";
 import "./shell.css";
 import AppShell, { activePages } from "./AppShell";
 import NetworkScanner from "./NetworkScanner";
+import BackupsPage from "./BackupsPage";
 import ReportsPage from "./ReportsPage";
 import SettingsPage from "./SettingsPage";
 import SslMonitor from "./SslMonitor";
@@ -74,6 +75,7 @@ function App() {
   const [alerts, setAlerts] = useState([]);
   const [networkScans, setNetworkScans] = useState([]);
   const [sslChecks, setSslChecks] = useState([]);
+  const [backupChecks, setBackupChecks] = useState([]);
   const [error, setError] = useState("");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState(null);
@@ -81,17 +83,19 @@ function App() {
   async function loadData() {
     setIsRefreshing(true);
     try {
-      const [serverResponse, alertResponse, scanResponse, sslResponse] = await Promise.all([
+      const [serverResponse, alertResponse, scanResponse, sslResponse, backupResponse] = await Promise.all([
         fetch(`${API_URL}/api/v1/servers`),
         fetch(`${API_URL}/api/v1/alerts`),
         fetch(`${API_URL}/api/v1/network-scans`),
         fetch(`${API_URL}/api/v1/ssl-checks`),
+        fetch(`${API_URL}/api/v1/backup-checks`),
       ]);
-      if (!serverResponse.ok || !alertResponse.ok || !scanResponse.ok || !sslResponse.ok) throw new Error();
+      if (!serverResponse.ok || !alertResponse.ok || !scanResponse.ok || !sslResponse.ok || !backupResponse.ok) throw new Error();
       setServers(await serverResponse.json());
       setAlerts(await alertResponse.json());
       setNetworkScans(await scanResponse.json());
       setSslChecks(await sslResponse.json());
+      setBackupChecks(await backupResponse.json());
       setError("");
       setLastUpdated(new Date());
     } catch {
@@ -120,6 +124,7 @@ function App() {
   else if (activePage === "scanner") page = <NetworkScanner apiUrl={API_URL} scans={networkScans} onCreated={loadData}/>;
   else if (activePage === "ssl") page = <SslMonitor apiUrl={API_URL} checks={sslChecks} onCreated={loadData}/>;
   else if (activePage === "reports") page = <ReportsPage apiUrl={API_URL} scans={networkScans}/>;
+  else if (activePage === "backups") page = <BackupsPage checks={backupChecks}/>;
   else if (activePage === "settings") page = <SettingsPage apiUrl={API_URL}/>;
   else page = <OverviewPage servers={servers} alerts={alerts} error={error}/>;
 

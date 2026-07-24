@@ -85,3 +85,19 @@ class SslCheck(Base):
     cipher: Mapped[str | None] = mapped_column(String(100))
     error: Mapped[str | None] = mapped_column(Text)
     checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class BackupCheck(Base):
+    __tablename__ = "backup_checks"
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    server_id: Mapped[UUID] = mapped_column(ForeignKey("servers.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    kind: Mapped[str] = mapped_column(String(20), index=True)
+    source: Mapped[str] = mapped_column(String(500))
+    status: Mapped[str] = mapped_column(String(20), index=True)
+    exists: Mapped[bool]
+    size_bytes: Mapped[int | None]
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    max_age_hours: Mapped[int]
+    error: Mapped[str | None] = mapped_column(Text)
+    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
