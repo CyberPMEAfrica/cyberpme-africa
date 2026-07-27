@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ ${EUID} -ne 0 ]]; then
+  echo "Exécutez ce configurateur avec sudo." >&2
+  exit 1
+fi
+
+read -r -p "URL d'ingestion CyberPME : " CYBERPME_URL
+read -r -s -p "Jeton du connecteur (masqué) : " CYBERPME_TOKEN
+echo
+
+if [[ ! ${CYBERPME_URL} =~ ^https?://.+/api/v1/ids-connectors/.+/events$ ]]; then
+  echo "L'URL d'ingestion CyberPME n'est pas valide." >&2
+  exit 1
+fi
+if [[ ${#CYBERPME_TOKEN} -lt 32 ]]; then
+  echo "Le jeton du connecteur est trop court." >&2
+  exit 1
+fi
+
+export CYBERPME_URL CYBERPME_TOKEN
+config="/var/ossec/etc/ossec.conf"
+backup="${config}.cyberpme-$(date +%Y%m%d-%H%M%S).bak"
+cp -a "${config}" "${backup}"
+
+python3 - "${config}" <<'PY'
+from html import escape
+import os
+from pathlib import Path
+import re
+import sys
+import tempfile
+import xml.etree.ElementTree as ET
+
+path = Path(sys.argv[1])
+content = path.read_text(encoding="utf-8")
+content = re.sub(
+    r"\s*<integration>\s*<name>custom-cyberpme</name>.*?</integration>",
+    "",
+    content,
+    flags=re.DOTALL,
+)
+closing = content.rfind("</ossec_config>")
+if closing < 0:
+    raise SystemExit("Aucune balise </ossec_config> trouvée.")
+
+block = f"""
+
+  <!-- CyberPME Africa - connecteur IDS en détection uniquement -->
+  <integration>
+    <name>custom-cyberpme</name>
+    <hook_url>{escape(os.environ["CYBERPME_URL"])}</hook_url>
+    <api_key>{escape(os.environ["CYBERPME_TOKEN"])}</api_key>
+    <level>7</level>
+    <alert_format>json</alert_format>
+    <timeout>10</timeout>
+    <retries>3</retries>
+  </integration>
+"""
+updated = content[:closing] + block + content[closing:]
+# Wazuh accepte plusieurs blocs <ossec_config> successifs. On ajoute donc une
+# racine temporaire uniquement pour la validation XML, sans modifier le fichier.
+validation_content = re.sub(r"<\?xml[^>]*\?>", "", updated)
+ET.fromstring(f"<wazuh_configuration>{validation_content}</wazuh_configuration>")
+
+stat = path.stat()
+with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
+    handle.write(updated)
+    temporary = Path(handle.name)
+os.chmod(temporary, stat.st_mode)
+os.chown(temporary, stat.st_uid, stat.st_gid)
+os.replace(temporary, path)
+PY
+
+unset CYBERPME_TOKEN
+if ! systemctl restart wazuh-manager; then
+  echo "Échec du redémarrage : restauration de ${backup}." >&2
+  cp -a "${backup}" "${config}"
+  systemctl restart wazuh-manager
+  exit 1
+fi
+
+echo "Intégration CyberPME configurée. Sauvegarde : ${backup}"
+systemctl is-active wazuh-manager

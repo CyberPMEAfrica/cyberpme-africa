@@ -1,0 +1,104 @@
+#!/usr/bin/env python3
+"""Adaptateur Wazuh vers l'API d'ingestion CyberPME Africa."""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+import json
+from pathlib import Path
+import sys
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+
+
+def nested(data: dict, *paths: str) -> str | None:
+    for path in paths:
+        value = data
+        for part in path.split("."):
+            if not isinstance(value, dict):
+                value = None
+                break
+            value = value.get(part)
+        if value not in (None, ""):
+            return str(value)
+    return None
+
+
+def severity_from_level(level: int) -> str:
+    if level >= 13:
+        return "critical"
+    if level >= 10:
+        return "high"
+    if level >= 7:
+        return "medium"
+    return "low"
+
+
+def category_from_groups(groups: list[str]) -> str:
+    lowered = {str(group).lower() for group in groups}
+    if lowered & {"authentication_failed", "authentication_failures", "authentication_success", "pam", "sshd"}:
+        return "authentication"
+    if lowered & {"malware", "rootkit", "trojan", "virus", "ransomware"}:
+        return "malware"
+    if lowered & {"vulnerability-detector", "vulnerability", "sca"}:
+        return "vulnerability"
+    return "network"
+
+
+def normalize_wazuh_alert(alert: dict) -> dict:
+    rule = alert.get("rule") if isinstance(alert.get("rule"), dict) else {}
+    agent = alert.get("agent") if isinstance(alert.get("agent"), dict) else {}
+    level = int(rule.get("level") or 0)
+    timestamp = str(alert.get("timestamp") or datetime.now(timezone.utc).isoformat())
+    rule_id = str(rule.get("id") or "unknown")
+    agent_id = str(agent.get("id") or "manager")
+    event_id = str(alert.get("id") or f"{rule_id}-{agent_id}-{timestamp}")
+    groups = rule.get("groups") if isinstance(rule.get("groups"), list) else []
+    title = str(rule.get("description") or "Alerte Wazuh")
+    description = nested(alert, "full_log", "data.message", "predecoder.program_name") or title
+    return {
+        "event_key": f"wazuh-{event_id}"[:128],
+        "source": "wazuh",
+        "category": category_from_groups(groups),
+        "severity": severity_from_level(level),
+        "title": title[:200],
+        "description": description[:4000],
+        "source_ip": nested(alert, "data.srcip", "srcip"),
+        "destination_ip": nested(alert, "data.dstip", "dstip", "agent.ip"),
+        "rule_id": rule_id[:80],
+        "occurred_at": timestamp,
+    }
+
+
+def send_event(alert_file: str, token: str, endpoint: str) -> None:
+    alert = json.loads(Path(alert_file).read_text(encoding="utf-8"))
+    payload = json.dumps(normalize_wazuh_alert(alert), ensure_ascii=False).encode("utf-8")
+    request = Request(
+        endpoint,
+        data=payload,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "User-Agent": "CyberPME-Wazuh-Adapter/1.0",
+        },
+    )
+    with urlopen(request, timeout=10) as response:
+        if response.status not in (200, 201):
+            raise RuntimeError(f"Réponse CyberPME inattendue : HTTP {response.status}")
+
+
+def main() -> int:
+    if len(sys.argv) < 4:
+        print("Usage: custom-cyberpme <alert_file> <api_key> <hook_url>", file=sys.stderr)
+        return 2
+    try:
+        send_event(sys.argv[1], sys.argv[2], sys.argv[3])
+        return 0
+    except (OSError, ValueError, KeyError, HTTPError, URLError, RuntimeError) as error:
+        print(f"CyberPME integration error: {error}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
