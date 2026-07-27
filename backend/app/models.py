@@ -122,7 +122,11 @@ class SecurityEvent(Base):
     destination_ip: Mapped[str | None] = mapped_column(String(45))
     rule_id: Mapped[str | None] = mapped_column(String(80))
     recommendation: Mapped[str] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(String(20), default="active", index=True)
+    status: Mapped[str] = mapped_column(String(20), default="new", index=True)
+    handled_by_email: Mapped[str | None] = mapped_column(String(254))
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolution_note: Mapped[str | None] = mapped_column(Text)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 

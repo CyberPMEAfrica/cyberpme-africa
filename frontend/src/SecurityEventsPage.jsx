@@ -2,15 +2,25 @@ import { useState } from "react";
 import "./scanner.css";
 
 const severityLabels = { low: "Faible", medium: "Moyenne", high: "Élevée", critical: "Critique" };
+const incidentLabels = { new: "Nouveau", acknowledged: "Pris en charge", resolved: "Résolu", active: "Nouveau" };
 
 export default function SecurityEventsPage({ apiUrl, token, events, connectors, servers, currentUser, onCreated }) {
-  const active = events.filter(event => event.status === "active");
+  const active = events.filter(event => event.status !== "resolved");
   const [name, setName] = useState("");
   const [connectorType, setConnectorType] = useState("wazuh");
   const [serverId, setServerId] = useState(servers[0]?.id || "");
   const [created, setCreated] = useState(null);
   const [message, setMessage] = useState("");
+  const [incidentFilter, setIncidentFilter] = useState("open");
+  const [resolvingId, setResolvingId] = useState("");
+  const [resolutionNote, setResolutionNote] = useState("");
   const canManage = ["owner", "admin"].includes(currentUser.role);
+  const canHandle = ["owner", "admin", "analyst"].includes(currentUser.role);
+  const filteredEvents = events.filter(event => {
+    if (incidentFilter === "all") return true;
+    if (incidentFilter === "open") return event.status !== "resolved";
+    return event.status === incidentFilter;
+  });
 
   async function submit(event) {
     event.preventDefault();
@@ -43,13 +53,30 @@ export default function SecurityEventsPage({ apiUrl, token, events, connectors, 
     }
   }
 
+  async function updateIncident(eventId, status, note = null) {
+    const response = await fetch(`${apiUrl}/api/v1/security-events/${eventId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ status, resolution_note: note }),
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      setMessage(error.detail || "Impossible de mettre à jour l’incident.");
+      return;
+    }
+    setResolvingId("");
+    setResolutionNote("");
+    setMessage("");
+    onCreated();
+  }
+
   return <section className="scanner">
     <div className="section-heading">
       <div><p className="eyebrow">DÉTECTION ET RÉPONSE</p><h2>IDS / IPS</h2></div>
       <span className="safe-mode">Mode détection · aucun blocage automatique</span>
     </div>
     <div className="backup-summary">
-      <article><span>Événements reçus</span><strong>{events.length}</strong></article>
+      <article><span>Incidents ouverts</span><strong>{active.length}</strong></article>
       <article><span>Élevés / critiques</span><strong className={active.some(x => ["high", "critical"].includes(x.severity)) ? "bad" : "good"}>{active.filter(x => ["high", "critical"].includes(x.severity)).length}</strong></article>
       <article><span>Connecteurs actifs</span><strong>{connectors.filter(x => x.status === "active").length}</strong></article>
     </div>
@@ -80,12 +107,15 @@ export default function SecurityEventsPage({ apiUrl, token, events, connectors, 
         </div>
       </div>
     </div>
-    <div className="section-heading event-heading"><div><p className="eyebrow">ÉVÉNEMENTS NORMALISÉS</p><h2>Détections récentes</h2></div></div>
+    <div className="section-heading event-heading">
+      <div><p className="eyebrow">ÉVÉNEMENTS NORMALISÉS</p><h2>Détections récentes</h2></div>
+      <label className="incident-filter">Afficher<select value={incidentFilter} onChange={event => setIncidentFilter(event.target.value)}><option value="open">Incidents ouverts</option><option value="new">Nouveaux</option><option value="acknowledged">Pris en charge</option><option value="resolved">Résolus</option><option value="all">Tous</option></select></label>
+    </div>
     <div className="security-events">
-      {events.length ? events.map(event => <article className={`security-event ${event.severity}`} key={event.id}>
+      {filteredEvents.length ? filteredEvents.map(event => <article className={`security-event ${event.severity} ${event.status}`} key={event.id}>
         <div className="ssl-head">
           <div><h3>{event.title}</h3><small>{event.server_name} · {event.source.toUpperCase()} · {new Date(event.occurred_at).toLocaleString("fr-FR")}</small></div>
-          <em className={`event-severity ${event.severity}`}>{severityLabels[event.severity]}</em>
+          <div className="incident-badges"><em className={`incident-status ${event.status}`}>{incidentLabels[event.status] || event.status}</em><em className={`event-severity ${event.severity}`}>{severityLabels[event.severity]}</em></div>
         </div>
         <p>{event.description}</p>
         <div className="event-details">
@@ -95,6 +125,17 @@ export default function SecurityEventsPage({ apiUrl, token, events, connectors, 
           {event.rule_id && <span>Règle <b>{event.rule_id}</b></span>}
         </div>
         <div className="event-recommendation"><strong>Action recommandée</strong><p>{event.recommendation}</p></div>
+        {event.handled_by_email && <p className="incident-owner">Suivi par <strong>{event.handled_by_email}</strong>{event.resolved_at ? ` · Résolu le ${new Date(event.resolved_at).toLocaleString("fr-FR")}` : ""}</p>}
+        {event.resolution_note && <div className="resolution-note"><strong>Conclusion</strong><p>{event.resolution_note}</p></div>}
+        {canHandle && <div className="incident-actions">
+          {(event.status === "new" || event.status === "active") && <button onClick={() => updateIncident(event.id, "acknowledged")}>Prendre en charge</button>}
+          {event.status !== "resolved" && <button className="secondary-button" onClick={() => setResolvingId(resolvingId === event.id ? "" : event.id)}>Résoudre</button>}
+          {event.status === "resolved" && <button className="secondary-button" onClick={() => updateIncident(event.id, "new", "Incident rouvert pour nouvelle analyse.")}>Rouvrir</button>}
+        </div>}
+        {resolvingId === event.id && <div className="resolution-form">
+          <label>Commentaire de résolution<textarea value={resolutionNote} onChange={item => setResolutionNote(item.target.value)} placeholder="Décrivez la vérification et la correction effectuée." maxLength="2000"/></label>
+          <button disabled={resolutionNote.trim().length < 3} onClick={() => updateIncident(event.id, "resolved", resolutionNote)}>Confirmer la résolution</button>
+        </div>}
       </article>) : <div className="empty-state"><h3>Aucun événement de sécurité</h3><p>Le collecteur Wazuh/Suricata sera connecté à cette page. Aucun blocage n’est actif.</p></div>}
     </div>
   </section>;

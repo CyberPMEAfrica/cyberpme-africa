@@ -138,7 +138,16 @@ class SecurityEventRead(SecurityEventCreate):
     server_name: str = ""
     recommendation: str
     status: str
+    handled_by_email: str | None
+    acknowledged_at: datetime | None
+    resolved_at: datetime | None
+    resolution_note: str | None
     received_at: datetime
+
+
+class SecurityIncidentUpdate(BaseModel):
+    status: str = Field(pattern="^(acknowledged|resolved|new)$")
+    resolution_note: str | None = Field(default=None, max_length=2000)
 
 
 class IdsConnectorCreate(BaseModel):
