@@ -33,6 +33,7 @@ from app.schemas import (
     NetworkScanRead,
     SecurityEventCreate,
     SecurityEventRead,
+    SecurityIncidentUpdate,
     CurrentUserRead,
     LoginRequest,
     SessionRead,
@@ -91,6 +92,17 @@ async def lifespan(_: FastAPI):
         connection.execute(
             text("CREATE UNIQUE INDEX IF NOT EXISTS uq_server_organization_hostname ON servers (organization_id, hostname)")
         )
+        security_columns = {column["name"] for column in inspect(connection).get_columns("security_events")}
+        security_column_types = {
+            "handled_by_email": "VARCHAR(254)",
+            "acknowledged_at": "TIMESTAMP WITH TIME ZONE" if connection.dialect.name == "postgresql" else "DATETIME",
+            "resolved_at": "TIMESTAMP WITH TIME ZONE" if connection.dialect.name == "postgresql" else "DATETIME",
+            "resolution_note": "TEXT",
+        }
+        for column_name, column_type in security_column_types.items():
+            if column_name not in security_columns:
+                connection.execute(text(f"ALTER TABLE security_events ADD COLUMN {column_name} {column_type}"))
+        connection.execute(text("UPDATE security_events SET status = 'new' WHERE status = 'active'"))
     if settings.bootstrap_admin_email and settings.bootstrap_admin_password:
         with next(get_db()) as db:
             organization = db.scalar(select(Organization).where(Organization.slug == settings.bootstrap_organization_slug))
@@ -567,6 +579,51 @@ def list_security_events(
         .limit(500)
     ).all()
     return [security_event_response(db, event) for event in events]
+
+
+@app.patch("/api/v1/security-events/{event_id}", response_model=SecurityEventRead)
+def update_security_incident(
+    event_id: UUID,
+    payload: SecurityIncidentUpdate,
+    context: tuple[User, Organization] = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> SecurityEventRead:
+    user, organization = context
+    require_role(user, "owner", "admin", "analyst")
+    event = db.scalar(
+        select(SecurityEvent)
+        .join(Server, SecurityEvent.server_id == Server.id)
+        .where(SecurityEvent.id == event_id, Server.organization_id == organization.id)
+    )
+    if event is None:
+        raise HTTPException(status_code=404, detail="Incident introuvable.")
+    now = datetime.now(timezone.utc)
+    if payload.status == "resolved":
+        note = (payload.resolution_note or "").strip()
+        if len(note) < 3:
+            raise HTTPException(status_code=422, detail="Un commentaire de résolution est requis.")
+        event.status = "resolved"
+        event.handled_by_email = user.email
+        event.acknowledged_at = event.acknowledged_at or now
+        event.resolved_at = now
+        event.resolution_note = note
+    elif payload.status == "acknowledged":
+        if event.status == "resolved":
+            raise HTTPException(status_code=409, detail="Rouvrez l’incident avant de le reprendre.")
+        event.status = "acknowledged"
+        event.handled_by_email = user.email
+        event.acknowledged_at = event.acknowledged_at or now
+        event.resolved_at = None
+        event.resolution_note = None
+    else:
+        event.status = "new"
+        event.handled_by_email = user.email
+        event.acknowledged_at = None
+        event.resolved_at = None
+        event.resolution_note = (payload.resolution_note or "").strip() or None
+    db.commit()
+    db.refresh(event)
+    return security_event_response(db, event)
 
 
 @app.get("/api/v1/ids-connectors", response_model=list[IdsConnectorRead])

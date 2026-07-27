@@ -240,7 +240,82 @@ def test_security_event_ingestion_is_authenticated_and_idempotent(client: TestCl
     assert created.json()["id"] == duplicate.json()["id"]
     assert created.json()["server_name"] == "Capteur IDS"
     assert "multifacteur" in created.json()["recommendation"]
+    assert created.json()["status"] == "new"
     assert len(client.get("/api/v1/security-events", headers=user_headers).json()) == 1
+
+    event_id = created.json()["id"]
+    acknowledged = client.patch(
+        f"/api/v1/security-events/{event_id}",
+        json={"status": "acknowledged"},
+        headers=user_headers,
+    )
+    assert acknowledged.status_code == 200
+    assert acknowledged.json()["status"] == "acknowledged"
+    assert acknowledged.json()["handled_by_email"] == "owner@example.test"
+    assert acknowledged.json()["acknowledged_at"] is not None
+
+    missing_note = client.patch(
+        f"/api/v1/security-events/{event_id}",
+        json={"status": "resolved"},
+        headers=user_headers,
+    )
+    assert missing_note.status_code == 422
+    resolved = client.patch(
+        f"/api/v1/security-events/{event_id}",
+        json={"status": "resolved", "resolution_note": "Compte vérifié et accès SSH durci."},
+        headers=user_headers,
+    )
+    assert resolved.status_code == 200
+    assert resolved.json()["status"] == "resolved"
+    assert resolved.json()["resolved_at"] is not None
+    assert resolved.json()["resolution_note"] == "Compte vérifié et accès SSH durci."
+
+    reopened = client.patch(
+        f"/api/v1/security-events/{event_id}",
+        json={"status": "new", "resolution_note": "Nouvelle activité observée."},
+        headers=user_headers,
+    )
+    assert reopened.status_code == 200
+    assert reopened.json()["status"] == "new"
+    assert reopened.json()["resolved_at"] is None
+
+
+def test_viewer_cannot_handle_security_incidents(client: TestClient, user_headers: dict[str, str]):
+    registration = client.post(
+        "/api/v1/agents/register",
+        json={"name": "Capteur lecture", "hostname": f"viewer-ids-{uuid4().hex}"},
+        headers={"X-Enrollment-Key": "ci-enrollment-secret"},
+    ).json()
+    created = client.post(
+        f"/api/v1/servers/{registration['server_id']}/security-events",
+        json={
+            "event_key": "viewer-event", "source": "agent", "category": "network",
+            "severity": "medium", "title": "Événement en lecture",
+            "description": "Événement réservé aux opérateurs.",
+            "occurred_at": datetime.now(timezone.utc).isoformat(),
+        },
+        headers={"Authorization": f"Bearer {registration['agent_token']}"},
+    ).json()
+    with SessionLocal() as db:
+        organization = db.query(Organization).filter_by(slug="pme-test").one()
+        db.add(User(
+            organization_id=organization.id,
+            email="viewer@example.test",
+            password_hash=hash_password("Viewer-password-strong-2026"),
+            role="viewer",
+        ))
+        db.commit()
+    login = client.post("/api/v1/auth/login", json={
+        "organization_slug": "pme-test",
+        "email": "viewer@example.test",
+        "password": "Viewer-password-strong-2026",
+    }).json()
+    response = client.patch(
+        f"/api/v1/security-events/{created['id']}",
+        json={"status": "acknowledged"},
+        headers={"Authorization": f"Bearer {login['access_token']}"},
+    )
+    assert response.status_code == 403
 
 
 def test_ids_connector_is_tenant_scoped_and_uses_a_dedicated_token(client: TestClient, user_headers: dict[str, str]):

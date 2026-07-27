@@ -76,6 +76,19 @@ local envoie ensuite un objet JSON normalisé :
 L'adaptateur fournisseur reste séparé du cœur SaaS : une PME peut donc utiliser
 Wazuh, Suricata, un autre SIEM, ou aucun connecteur IDS.
 
+### Cycle de vie d'un incident
+
+Une détection normalisée devient un incident traçable :
+
+1. `new` : nouvel événement à analyser ;
+2. `acknowledged` : pris en charge par un opérateur identifié ;
+3. `resolved` : vérification terminée avec commentaire obligatoire ;
+4. retour à `new` lorsqu'une nouvelle analyse est nécessaire.
+
+Les rôles `owner`, `admin` et `analyst` peuvent traiter un incident. Le rôle
+`viewer` reste en lecture seule. L'adresse du responsable et les dates de prise
+en charge et de résolution sont conservées avec l'événement.
+
 ## Déploiement client
 
 L'agent fonctionne sous Windows et Linux et utilise uniquement :

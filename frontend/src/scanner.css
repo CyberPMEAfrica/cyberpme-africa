@@ -83,3 +83,23 @@
 .danger-button { min-width:0; padding:8px 10px; color:#ff9ba1; background:#46232c; }
 .event-heading { margin:10px 0 16px; }
 @media(max-width:800px){.connector-layout{grid-template-columns:1fr}.connector-list article{grid-template-columns:1fr auto}.connector-list .danger-button{grid-column:1/-1}}
+.incident-filter { display:flex; align-items:center; gap:9px; color:#7895a5; font-size:12px; }
+.incident-filter select { padding:9px 11px; border:1px solid #2b4c5d; border-radius:8px; color:#e9f2f7; background:#071a28; }
+.incident-badges { display:flex; align-items:center; gap:7px; }
+.incident-status { padding:7px 10px; border-radius:999px; font-size:11px; font-style:normal; font-weight:700; color:#65dfff; background:#173244; }
+.incident-status.acknowledged { color:#ffc857; background:#463a19; }
+.incident-status.resolved { color:#2de0a7; background:#103d36; }
+.security-event.resolved { opacity:.82; border-left-color:#2de0a7; }
+.incident-owner { margin:13px 0 0; color:#7895a5; font-size:12px; }
+.incident-owner strong { color:#b8ccd6; }
+.resolution-note { margin-top:12px; padding:13px; border-radius:9px; background:#102a39; }
+.resolution-note strong { color:#65dfff; font-size:12px; }
+.resolution-note p { margin:6px 0 0; color:#b8ccd6; }
+.incident-actions { display:flex; flex-wrap:wrap; gap:9px; margin-top:15px; }
+.incident-actions button { min-width:0; padding:9px 12px; }
+.secondary-button { color:#b8ccd6; background:#173244; }
+.resolution-form { display:grid; gap:10px; margin-top:12px; padding:14px; border:1px solid #2b4c5d; border-radius:10px; background:#071a28; }
+.resolution-form label { display:grid; gap:7px; color:#b8ccd6; font-size:12px; font-weight:600; }
+.resolution-form textarea { min-height:90px; resize:vertical; padding:11px; border:1px solid #2b4c5d; border-radius:8px; color:#e9f2f7; background:#0b2231; }
+.resolution-form button { justify-self:start; }
+@media(max-width:700px){.event-heading{align-items:start;flex-direction:column}.incident-filter{width:100%;justify-content:space-between}.incident-badges{align-items:flex-end;flex-direction:column}}
