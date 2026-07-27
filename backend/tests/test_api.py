@@ -241,3 +241,65 @@ def test_security_event_ingestion_is_authenticated_and_idempotent(client: TestCl
     assert created.json()["server_name"] == "Capteur IDS"
     assert "multifacteur" in created.json()["recommendation"]
     assert len(client.get("/api/v1/security-events", headers=user_headers).json()) == 1
+
+
+def test_ids_connector_is_tenant_scoped_and_uses_a_dedicated_token(client: TestClient, user_headers: dict[str, str]):
+    registration = client.post(
+        "/api/v1/agents/register",
+        json={"name": "SOC principal", "hostname": f"soc-{uuid4().hex}", "ip_address": "10.10.0.5"},
+        headers={"X-Enrollment-Key": "ci-enrollment-secret"},
+    ).json()
+    created = client.post(
+        "/api/v1/ids-connectors",
+        json={"name": "Wazuh siège", "connector_type": "wazuh", "server_id": registration["server_id"]},
+        headers=user_headers,
+    )
+    assert created.status_code == 201
+    connector = created.json()
+    assert connector["ingest_token"]
+    assert connector["server_name"] == "SOC principal"
+    assert "ingest_token" not in client.get("/api/v1/ids-connectors", headers=user_headers).text
+
+    event = {
+        "event_key": "wazuh-connector-1", "source": "wazuh", "category": "authentication",
+        "severity": "high", "title": "Tentatives SSH répétées",
+        "description": "Plusieurs échecs ont été détectés.", "source_ip": "203.0.113.10",
+        "destination_ip": "10.10.0.5", "rule_id": "5710",
+        "occurred_at": datetime.now(timezone.utc).isoformat(),
+    }
+    endpoint = connector["ingest_path"]
+    assert client.post(endpoint, json=event).status_code == 401
+    assert client.post(endpoint, json=event, headers={"Authorization": "Bearer incorrect"}).status_code == 401
+    ingested = client.post(
+        endpoint,
+        json=event,
+        headers={"Authorization": f"Bearer {connector['ingest_token']}"},
+    )
+    duplicate = client.post(
+        endpoint,
+        json=event,
+        headers={"Authorization": f"Bearer {connector['ingest_token']}"},
+    )
+    assert ingested.status_code == 201
+    assert ingested.json()["id"] == duplicate.json()["id"]
+    listed = client.get("/api/v1/ids-connectors", headers=user_headers).json()
+    assert listed[0]["last_event_at"] is not None
+
+    with SessionLocal() as db:
+        other = Organization(name="PME isolée", slug="pme-isolee")
+        db.add(other)
+        db.flush()
+        db.add(User(
+            organization_id=other.id,
+            email="owner@isolee.test",
+            password_hash=hash_password("Isolated-password-strong-2026"),
+            role="owner",
+        ))
+        db.commit()
+    other_login = client.post("/api/v1/auth/login", json={
+        "organization_slug": "pme-isolee",
+        "email": "owner@isolee.test",
+        "password": "Isolated-password-strong-2026",
+    }).json()
+    other_headers = {"Authorization": f"Bearer {other_login['access_token']}"}
+    assert client.get("/api/v1/ids-connectors", headers=other_headers).json() == []

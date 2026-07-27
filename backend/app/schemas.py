@@ -141,6 +141,29 @@ class SecurityEventRead(SecurityEventCreate):
     received_at: datetime
 
 
+class IdsConnectorCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+    connector_type: str = Field(pattern="^(wazuh|suricata|other)$")
+    server_id: UUID
+
+
+class IdsConnectorRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    name: str
+    connector_type: str
+    server_id: UUID
+    server_name: str = ""
+    status: str
+    last_event_at: datetime | None
+    created_at: datetime
+
+
+class IdsConnectorCreated(IdsConnectorRead):
+    ingest_token: str
+    ingest_path: str
+
+
 class LoginRequest(BaseModel):
     organization_slug: str = Field(min_length=2, max_length=80)
     email: str = Field(min_length=5, max_length=254)

@@ -81,6 +81,7 @@ function App() {
   const [sslChecks, setSslChecks] = useState([]);
   const [backupChecks, setBackupChecks] = useState([]);
   const [securityEvents, setSecurityEvents] = useState([]);
+  const [idsConnectors, setIdsConnectors] = useState([]);
   const [error, setError] = useState("");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState(null);
@@ -90,17 +91,19 @@ function App() {
     setIsRefreshing(true);
     try {
       const request = (path) => fetch(`${API_URL}${path}`, { headers: { Authorization: `Bearer ${token}` } });
-      const [serverResponse, alertResponse, scanResponse, sslResponse, backupResponse, securityResponse] = await Promise.all([
+      const [serverResponse, alertResponse, scanResponse, sslResponse, backupResponse, securityResponse, connectorResponse] = await Promise.all([
         request("/api/v1/servers"), request("/api/v1/alerts"), request("/api/v1/network-scans"),
         request("/api/v1/ssl-checks"), request("/api/v1/backup-checks"), request("/api/v1/security-events"),
+        request("/api/v1/ids-connectors"),
       ]);
-      if (!serverResponse.ok || !alertResponse.ok || !scanResponse.ok || !sslResponse.ok || !backupResponse.ok || !securityResponse.ok) throw new Error();
+      if (!serverResponse.ok || !alertResponse.ok || !scanResponse.ok || !sslResponse.ok || !backupResponse.ok || !securityResponse.ok || !connectorResponse.ok) throw new Error();
       setServers(await serverResponse.json());
       setAlerts(await alertResponse.json());
       setNetworkScans(await scanResponse.json());
       setSslChecks(await sslResponse.json());
       setBackupChecks(await backupResponse.json());
       setSecurityEvents(await securityResponse.json());
+      setIdsConnectors(await connectorResponse.json());
       setError("");
       setLastUpdated(new Date());
     } catch {
@@ -152,7 +155,7 @@ function App() {
   else if (activePage === "ssl") page = <SslMonitor apiUrl={API_URL} token={sessionToken} checks={sslChecks} onCreated={loadData}/>;
   else if (activePage === "reports") page = <ReportsPage apiUrl={API_URL} token={sessionToken} scans={networkScans}/>;
   else if (activePage === "backups") page = <BackupsPage checks={backupChecks}/>;
-  else if (activePage === "ids") page = <SecurityEventsPage events={securityEvents}/>;
+  else if (activePage === "ids") page = <SecurityEventsPage apiUrl={API_URL} token={sessionToken} events={securityEvents} connectors={idsConnectors} servers={servers} currentUser={currentUser} onCreated={loadData}/>;
   else if (activePage === "settings") page = <SettingsPage apiUrl={API_URL}/>;
   else page = <OverviewPage servers={servers} alerts={alerts} error={error}/>;
 

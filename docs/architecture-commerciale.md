@@ -45,6 +45,37 @@ Autre SIEM ----/
 Un connecteur est configuré par organisation. `Wazuh` et `Suricata` ne sont
 donc jamais des dépendances obligatoires.
 
+### Connecteurs IDS en mode push
+
+Un propriétaire ou administrateur crée un connecteur depuis la page
+`IDS / IPS`, choisit le capteur associé et reçoit :
+
+- une URL d'ingestion propre au connecteur ;
+- un jeton aléatoire affiché une seule fois ;
+- un format d'événement CyberPME commun à tous les fournisseurs.
+
+Seul le hachage du jeton est conservé dans la base. Sa suppression depuis le
+tableau de bord révoque immédiatement l'accès. Wazuh, Suricata ou un adaptateur
+local envoie ensuite un objet JSON normalisé :
+
+```json
+{
+  "event_key": "wazuh-5710-1700000000",
+  "source": "wazuh",
+  "category": "authentication",
+  "severity": "high",
+  "title": "Échecs de connexion SSH répétés",
+  "description": "Plusieurs authentifications ont échoué.",
+  "source_ip": "203.0.113.10",
+  "destination_ip": "10.10.0.5",
+  "rule_id": "5710",
+  "occurred_at": "2026-07-27T10:00:00Z"
+}
+```
+
+L'adaptateur fournisseur reste séparé du cœur SaaS : une PME peut donc utiliser
+Wazuh, Suricata, un autre SIEM, ou aucun connecteur IDS.
+
 ## Déploiement client
 
 L'agent fonctionne sous Windows et Linux et utilise uniquement :
@@ -72,7 +103,7 @@ Le blocage automatique est désactivé par défaut. Toute action est journalisé
 
 1. Organisations, utilisateurs, rôles et isolation des requêtes.
 2. Migrations de base versionnées.
-3. Connecteurs et secrets chiffrés.
+3. Adaptateurs automatiques Wazuh/Suricata et rotation des jetons de connecteur.
 4. Journal d'audit immuable.
 5. HTTPS, domaine, rotation des secrets et sauvegarde hors machine.
 6. Tests de charge, restauration, reprise après incident et sécurité.
