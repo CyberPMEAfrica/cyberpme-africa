@@ -7,6 +7,7 @@ import "./shell.css";
 import AppShell, { activePages } from "./AppShell";
 import NetworkScanner from "./NetworkScanner";
 import BackupsPage from "./BackupsPage";
+import LoginPage from "./LoginPage";
 import ReportsPage from "./ReportsPage";
 import SecurityEventsPage from "./SecurityEventsPage";
 import SettingsPage from "./SettingsPage";
@@ -71,6 +72,8 @@ function pageFromHash() {
 }
 
 function App() {
+  const [sessionToken, setSessionToken] = useState(() => localStorage.getItem("cyberpme_session") || "");
+  const [currentUser, setCurrentUser] = useState(null);
   const [activePage, setActivePage] = useState(pageFromHash);
   const [servers, setServers] = useState([]);
   const [alerts, setAlerts] = useState([]);
@@ -82,16 +85,14 @@ function App() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState(null);
 
-  async function loadData() {
+  async function loadData(token = sessionToken) {
+    if (!token) return;
     setIsRefreshing(true);
     try {
+      const request = (path) => fetch(`${API_URL}${path}`, { headers: { Authorization: `Bearer ${token}` } });
       const [serverResponse, alertResponse, scanResponse, sslResponse, backupResponse, securityResponse] = await Promise.all([
-        fetch(`${API_URL}/api/v1/servers`),
-        fetch(`${API_URL}/api/v1/alerts`),
-        fetch(`${API_URL}/api/v1/network-scans`),
-        fetch(`${API_URL}/api/v1/ssl-checks`),
-        fetch(`${API_URL}/api/v1/backup-checks`),
-        fetch(`${API_URL}/api/v1/security-events`),
+        request("/api/v1/servers"), request("/api/v1/alerts"), request("/api/v1/network-scans"),
+        request("/api/v1/ssl-checks"), request("/api/v1/backup-checks"), request("/api/v1/security-events"),
       ]);
       if (!serverResponse.ok || !alertResponse.ok || !scanResponse.ok || !sslResponse.ok || !backupResponse.ok || !securityResponse.ok) throw new Error();
       setServers(await serverResponse.json());
@@ -117,23 +118,45 @@ function App() {
     const handleHash = () => setActivePage(pageFromHash());
     window.addEventListener("hashchange", handleHash);
     if (!window.location.hash) window.history.replaceState(null, "", "#/overview");
-    loadData();
-    const timer = setInterval(loadData, 10000);
-    return () => { window.removeEventListener("hashchange", handleHash); clearInterval(timer); };
+    return () => window.removeEventListener("hashchange", handleHash);
   }, []);
+
+  useEffect(() => {
+    if (!sessionToken) { setCurrentUser(null); return; }
+    fetch(`${API_URL}/api/v1/auth/me`, { headers: { Authorization: `Bearer ${sessionToken}` } })
+      .then(response => { if (!response.ok) throw new Error(); return response.json(); })
+      .then(user => { setCurrentUser(user); loadData(sessionToken); })
+      .catch(() => { localStorage.removeItem("cyberpme_session"); setSessionToken(""); setCurrentUser(null); });
+    const timer = setInterval(() => loadData(sessionToken), 10000);
+    return () => clearInterval(timer);
+  }, [sessionToken]);
+
+  function authenticated(session) {
+    localStorage.setItem("cyberpme_session", session.access_token);
+    setSessionToken(session.access_token);
+  }
+
+  async function logout() {
+    if (sessionToken) await fetch(`${API_URL}/api/v1/auth/logout`, { method: "POST", headers: { Authorization: `Bearer ${sessionToken}` } });
+    localStorage.removeItem("cyberpme_session");
+    setSessionToken("");
+    setCurrentUser(null);
+  }
+
+  if (!sessionToken || !currentUser) return <LoginPage apiUrl={API_URL} onAuthenticated={authenticated}/>;
 
   let page;
   if (activePage === "servers") page = <ServersPage servers={servers} error={error}/>;
   else if (activePage === "alerts") page = <AlertsPage alerts={alerts}/>;
-  else if (activePage === "scanner") page = <NetworkScanner apiUrl={API_URL} scans={networkScans} onCreated={loadData}/>;
-  else if (activePage === "ssl") page = <SslMonitor apiUrl={API_URL} checks={sslChecks} onCreated={loadData}/>;
-  else if (activePage === "reports") page = <ReportsPage apiUrl={API_URL} scans={networkScans}/>;
+  else if (activePage === "scanner") page = <NetworkScanner apiUrl={API_URL} token={sessionToken} scans={networkScans} onCreated={loadData}/>;
+  else if (activePage === "ssl") page = <SslMonitor apiUrl={API_URL} token={sessionToken} checks={sslChecks} onCreated={loadData}/>;
+  else if (activePage === "reports") page = <ReportsPage apiUrl={API_URL} token={sessionToken} scans={networkScans}/>;
   else if (activePage === "backups") page = <BackupsPage checks={backupChecks}/>;
   else if (activePage === "ids") page = <SecurityEventsPage events={securityEvents}/>;
   else if (activePage === "settings") page = <SettingsPage apiUrl={API_URL}/>;
   else page = <OverviewPage servers={servers} alerts={alerts} error={error}/>;
 
-  return <AppShell activePage={activePage} onNavigate={navigate} apiOnline={!error} isRefreshing={isRefreshing} lastUpdated={lastUpdated} onRefresh={loadData}>
+  return <AppShell activePage={activePage} onNavigate={navigate} apiOnline={!error} isRefreshing={isRefreshing} lastUpdated={lastUpdated} onRefresh={() => loadData()} currentUser={currentUser} onLogout={logout}>
     {error && <p className="error">{error}</p>}
     {page}
   </AppShell>;

@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
 import secrets
@@ -8,13 +8,14 @@ from uuid import UUID
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
-from sqlalchemy import select
+from sqlalchemy import inspect, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.config import settings
+from app.auth import hash_password, hash_session_token, issue_session_token, verify_password
 from app.database import Base, engine, get_db
 from app.email_notifications import send_alert_email
-from app.models import AgentCredential, Alert, BackupCheck, Metric, NetworkScan, SecurityEvent, Server, SslCheck
+from app.models import AgentCredential, Alert, BackupCheck, Metric, NetworkScan, Organization, SecurityEvent, Server, SslCheck, User, UserSession
 from app.network_scanner import run_network_scan, validate_private_target
 from app.network_report import build_network_scan_pdf
 from app.schemas import (
@@ -29,6 +30,9 @@ from app.schemas import (
     NetworkScanRead,
     SecurityEventCreate,
     SecurityEventRead,
+    CurrentUserRead,
+    LoginRequest,
+    SessionRead,
     ServerCreate,
     ServerRead,
     SslCheckCreate,
@@ -40,11 +44,101 @@ from app.ssl_monitor import inspect_certificate, validate_public_hostname
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine)
+    with engine.begin() as connection:
+        columns = {column["name"] for column in inspect(connection).get_columns("organizations")}
+        for name in ("enrollment_key_hash", "scan_key_hash"):
+            if name not in columns:
+                connection.execute(text(f"ALTER TABLE organizations ADD COLUMN {name} VARCHAR(64)"))
+    with next(get_db()) as db:
+        organization = db.scalar(select(Organization).where(Organization.slug == settings.bootstrap_organization_slug))
+        if organization is None:
+            organization = Organization(
+                name=settings.bootstrap_organization_name,
+                slug=settings.bootstrap_organization_slug,
+            )
+            db.add(organization)
+            db.flush()
+        organization.enrollment_key_hash = token_hash(settings.agent_enrollment_key)
+        organization.scan_key_hash = token_hash(settings.network_scan_key)
+        db.commit()
+        organization_id = organization.id
+    with engine.begin() as connection:
+        inspector = inspect(connection)
+        for table_name in ("servers", "network_scans", "ssl_checks"):
+            columns = {column["name"] for column in inspector.get_columns(table_name)}
+            if "organization_id" not in columns:
+                column_type = "UUID" if connection.dialect.name == "postgresql" else "CHAR(32)"
+                connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN organization_id {column_type}"))
+            if connection.dialect.name == "postgresql":
+                update_statement = text(
+                    f"UPDATE {table_name} SET organization_id = CAST(:organization_id AS UUID) WHERE organization_id IS NULL"
+                )
+                migration_id = str(organization_id)
+            else:
+                update_statement = text(
+                    f"UPDATE {table_name} SET organization_id = :organization_id WHERE organization_id IS NULL"
+                )
+                migration_id = organization_id.hex
+            connection.execute(update_statement, {"organization_id": migration_id})
+            connection.execute(
+                text(f"CREATE INDEX IF NOT EXISTS ix_{table_name}_organization_id ON {table_name} (organization_id)")
+            )
+        if connection.dialect.name == "postgresql":
+            connection.execute(text("ALTER TABLE servers DROP CONSTRAINT IF EXISTS servers_hostname_key"))
+        connection.execute(
+            text("CREATE UNIQUE INDEX IF NOT EXISTS uq_server_organization_hostname ON servers (organization_id, hostname)")
+        )
+    if settings.bootstrap_admin_email and settings.bootstrap_admin_password:
+        with next(get_db()) as db:
+            organization = db.scalar(select(Organization).where(Organization.slug == settings.bootstrap_organization_slug))
+            user = db.scalar(
+                select(User).where(
+                    User.organization_id == organization.id,
+                    User.email == settings.bootstrap_admin_email.lower(),
+                )
+            )
+            if user is None:
+                db.add(
+                    User(
+                        organization_id=organization.id,
+                        email=settings.bootstrap_admin_email.lower(),
+                        password_hash=hash_password(settings.bootstrap_admin_password),
+                        role="owner",
+                    )
+                )
+            db.commit()
     yield
 
 
 app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+
+def require_user(
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+) -> tuple[User, Organization]:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Authentification requise.")
+    supplied = authorization.removeprefix("Bearer ").strip()
+    session = db.scalar(select(UserSession).where(UserSession.token_hash == hash_session_token(supplied)))
+    now = datetime.now(timezone.utc)
+    if session is None:
+        raise HTTPException(status_code=401, detail="Session invalide ou expirée.")
+    expires_at = session.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at <= now:
+        db.delete(session)
+        db.commit()
+        raise HTTPException(status_code=401, detail="Session invalide ou expirée.")
+    user = db.get(User, session.user_id)
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=401, detail="Compte indisponible.")
+    organization = db.get(Organization, user.organization_id)
+    if organization is None:
+        raise HTTPException(status_code=401, detail="Organisation indisponible.")
+    return user, organization
 
 
 def server_response(db: Session, server: Server) -> ServerRead:
@@ -95,9 +189,61 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.post("/api/v1/auth/login", response_model=SessionRead)
+def login(payload: LoginRequest, db: Session = Depends(get_db)) -> SessionRead:
+    organization = db.scalar(select(Organization).where(Organization.slug == payload.organization_slug.lower()))
+    user = None
+    if organization:
+        user = db.scalar(
+            select(User).where(
+                User.organization_id == organization.id,
+                User.email == payload.email.lower(),
+            )
+        )
+    if user is None or not user.is_active or not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Identifiants invalides.")
+    raw_token, token_digest = issue_session_token()
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=12)
+    db.add(UserSession(user_id=user.id, token_hash=token_digest, expires_at=expires_at))
+    db.commit()
+    return SessionRead(access_token=raw_token, expires_at=expires_at)
+
+
+@app.get("/api/v1/auth/me", response_model=CurrentUserRead)
+def current_user(context: tuple[User, Organization] = Depends(require_user)) -> CurrentUserRead:
+    user, organization = context
+    return CurrentUserRead(
+        id=user.id,
+        organization_id=organization.id,
+        organization_name=organization.name,
+        email=user.email,
+        role=user.role,
+    )
+
+
+@app.post("/api/v1/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
+def logout(
+    authorization: str | None = Header(default=None),
+    context: tuple[User, Organization] = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    del context
+    token = authorization.removeprefix("Bearer ").strip() if authorization else ""
+    session = db.scalar(select(UserSession).where(UserSession.token_hash == hash_session_token(token)))
+    if session:
+        db.delete(session)
+        db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @app.post("/api/v1/servers", response_model=ServerRead, status_code=status.HTTP_201_CREATED)
-def create_server(payload: ServerCreate, db: Session = Depends(get_db)) -> ServerRead:
-    server = Server(**payload.model_dump())
+def create_server(
+    payload: ServerCreate,
+    context: tuple[User, Organization] = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> ServerRead:
+    _, organization = context
+    server = Server(organization_id=organization.id, **payload.model_dump())
     db.add(server)
     try:
         db.commit()
@@ -109,18 +255,28 @@ def create_server(payload: ServerCreate, db: Session = Depends(get_db)) -> Serve
 
 
 @app.get("/api/v1/servers", response_model=list[ServerRead])
-def list_servers(db: Session = Depends(get_db)) -> list[ServerRead]:
-    servers = db.scalars(select(Server).order_by(Server.created_at.desc())).all()
+def list_servers(
+    context: tuple[User, Organization] = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> list[ServerRead]:
+    _, organization = context
+    servers = db.scalars(
+        select(Server).where(Server.organization_id == organization.id).order_by(Server.created_at.desc())
+    ).all()
     return [server_response(db, server) for server in servers]
 
 
 @app.post("/api/v1/agents/register", response_model=AgentRegistrationRead)
 def register_agent(payload: AgentRegistration, x_enrollment_key: str | None = Header(default=None), db: Session = Depends(get_db)) -> AgentRegistrationRead:
-    if not x_enrollment_key or not hmac.compare_digest(x_enrollment_key, settings.agent_enrollment_key):
+    supplied_hash = token_hash(x_enrollment_key or "")
+    organization = db.scalar(select(Organization).where(Organization.enrollment_key_hash == supplied_hash))
+    if organization is None or not x_enrollment_key or not hmac.compare_digest(supplied_hash, organization.enrollment_key_hash or ""):
         raise HTTPException(status_code=401, detail="Clé d’enrôlement invalide.")
-    server = db.scalar(select(Server).where(Server.hostname == payload.hostname))
+    server = db.scalar(
+        select(Server).where(Server.organization_id == organization.id, Server.hostname == payload.hostname)
+    )
     if server is None:
-        server = Server(**payload.model_dump())
+        server = Server(organization_id=organization.id, **payload.model_dump())
         db.add(server)
         db.flush()
     else:
@@ -164,17 +320,30 @@ def update_alerts(db: Session, server: Server, values: dict[str, float], now: da
 
 
 @app.get("/api/v1/alerts", response_model=list[AlertRead])
-def list_alerts(active_only: bool = True, db: Session = Depends(get_db)) -> list[AlertRead]:
-    query = select(Alert).order_by(Alert.created_at.desc())
+def list_alerts(
+    active_only: bool = True,
+    context: tuple[User, Organization] = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> list[AlertRead]:
+    _, organization = context
+    query = (
+        select(Alert)
+        .join(Server, Alert.server_id == Server.id)
+        .where(Server.organization_id == organization.id)
+        .order_by(Alert.created_at.desc())
+    )
     if active_only:
         query = query.where(Alert.status == "active")
     alerts = db.scalars(query).all()
     return [AlertRead.model_validate(alert).model_copy(update={"server_name": alert.server.name}) for alert in alerts]
 
 
-def require_scan_key(x_scan_key: str | None) -> None:
-    if not x_scan_key or not hmac.compare_digest(x_scan_key, settings.network_scan_key):
+def require_scan_key(db: Session, x_scan_key: str | None) -> Organization:
+    supplied_hash = token_hash(x_scan_key or "")
+    organization = db.scalar(select(Organization).where(Organization.scan_key_hash == supplied_hash))
+    if organization is None or not x_scan_key or not hmac.compare_digest(supplied_hash, organization.scan_key_hash or ""):
         raise HTTPException(status_code=401, detail="Clé d’audit réseau invalide.")
+    return organization
 
 
 @app.post("/api/v1/network-scans", response_model=NetworkScanRead, status_code=status.HTTP_202_ACCEPTED)
@@ -184,15 +353,20 @@ def create_network_scan(
     x_scan_key: str | None = Header(default=None),
     db: Session = Depends(get_db),
 ) -> NetworkScan:
-    require_scan_key(x_scan_key)
+    organization = require_scan_key(db, x_scan_key)
     try:
         target = validate_private_target(payload.target)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    active_scan = db.scalar(select(NetworkScan).where(NetworkScan.status.in_(("pending", "running"))))
+    active_scan = db.scalar(
+        select(NetworkScan).where(
+            NetworkScan.organization_id == organization.id,
+            NetworkScan.status.in_(("pending", "running")),
+        )
+    )
     if active_scan is not None:
         raise HTTPException(status_code=409, detail="Un audit réseau est déjà en cours.")
-    scan = NetworkScan(target=target)
+    scan = NetworkScan(organization_id=organization.id, target=target)
     db.add(scan)
     db.commit()
     db.refresh(scan)
@@ -201,21 +375,45 @@ def create_network_scan(
 
 
 @app.get("/api/v1/network-scans", response_model=list[NetworkScanRead])
-def list_network_scans(db: Session = Depends(get_db)) -> list[NetworkScan]:
-    return list(db.scalars(select(NetworkScan).order_by(NetworkScan.requested_at.desc())).all())
+def list_network_scans(
+    context: tuple[User, Organization] = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> list[NetworkScan]:
+    _, organization = context
+    return list(
+        db.scalars(
+            select(NetworkScan)
+            .where(NetworkScan.organization_id == organization.id)
+            .order_by(NetworkScan.requested_at.desc())
+        ).all()
+    )
 
 
 @app.get("/api/v1/network-scans/{scan_id}", response_model=NetworkScanRead)
-def get_network_scan(scan_id: UUID, db: Session = Depends(get_db)) -> NetworkScan:
-    scan = db.get(NetworkScan, scan_id)
+def get_network_scan(
+    scan_id: UUID,
+    context: tuple[User, Organization] = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> NetworkScan:
+    _, organization = context
+    scan = db.scalar(
+        select(NetworkScan).where(NetworkScan.id == scan_id, NetworkScan.organization_id == organization.id)
+    )
     if scan is None:
         raise HTTPException(status_code=404, detail="Audit réseau introuvable.")
     return scan
 
 
 @app.get("/api/v1/network-scans/{scan_id}/report")
-def get_network_scan_report(scan_id: UUID, db: Session = Depends(get_db)) -> Response:
-    scan = db.get(NetworkScan, scan_id)
+def get_network_scan_report(
+    scan_id: UUID,
+    context: tuple[User, Organization] = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    _, organization = context
+    scan = db.scalar(
+        select(NetworkScan).where(NetworkScan.id == scan_id, NetworkScan.organization_id == organization.id)
+    )
     if scan is None:
         raise HTTPException(status_code=404, detail="Audit réseau introuvable.")
     if scan.status != "completed":
@@ -234,7 +432,7 @@ def create_ssl_check(
     x_scan_key: str | None = Header(default=None),
     db: Session = Depends(get_db),
 ) -> SslCheck:
-    require_scan_key(x_scan_key)
+    organization = require_scan_key(db, x_scan_key)
     try:
         hostname, _ = validate_public_hostname(payload.hostname, payload.port)
     except ValueError as exc:
@@ -254,7 +452,7 @@ def create_ssl_check(
             "cipher": None,
             "error": str(exc),
         }
-    check = SslCheck(hostname=hostname, port=payload.port, **result)
+    check = SslCheck(organization_id=organization.id, hostname=hostname, port=payload.port, **result)
     db.add(check)
     db.commit()
     db.refresh(check)
@@ -262,8 +460,18 @@ def create_ssl_check(
 
 
 @app.get("/api/v1/ssl-checks", response_model=list[SslCheckRead])
-def list_ssl_checks(db: Session = Depends(get_db)) -> list[SslCheck]:
-    return list(db.scalars(select(SslCheck).order_by(SslCheck.checked_at.desc())).all())
+def list_ssl_checks(
+    context: tuple[User, Organization] = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> list[SslCheck]:
+    _, organization = context
+    return list(
+        db.scalars(
+            select(SslCheck)
+            .where(SslCheck.organization_id == organization.id)
+            .order_by(SslCheck.checked_at.desc())
+        ).all()
+    )
 
 
 @app.post("/api/v1/servers/{server_id}/backup-checks", response_model=BackupCheckRead, status_code=status.HTTP_201_CREATED)
@@ -291,8 +499,18 @@ def create_backup_check(
 
 
 @app.get("/api/v1/backup-checks", response_model=list[BackupCheckRead])
-def list_backup_checks(db: Session = Depends(get_db)) -> list[BackupCheckRead]:
-    checks = db.scalars(select(BackupCheck).order_by(BackupCheck.checked_at.desc()).limit(200)).all()
+def list_backup_checks(
+    context: tuple[User, Organization] = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> list[BackupCheckRead]:
+    _, organization = context
+    checks = db.scalars(
+        select(BackupCheck)
+        .join(Server, BackupCheck.server_id == Server.id)
+        .where(Server.organization_id == organization.id)
+        .order_by(BackupCheck.checked_at.desc())
+        .limit(200)
+    ).all()
     return [backup_response(db, check) for check in checks]
 
 
@@ -322,8 +540,18 @@ def create_security_event(
 
 
 @app.get("/api/v1/security-events", response_model=list[SecurityEventRead])
-def list_security_events(db: Session = Depends(get_db)) -> list[SecurityEventRead]:
-    events = db.scalars(select(SecurityEvent).order_by(SecurityEvent.occurred_at.desc()).limit(500)).all()
+def list_security_events(
+    context: tuple[User, Organization] = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> list[SecurityEventRead]:
+    _, organization = context
+    events = db.scalars(
+        select(SecurityEvent)
+        .join(Server, SecurityEvent.server_id == Server.id)
+        .where(Server.organization_id == organization.id)
+        .order_by(SecurityEvent.occurred_at.desc())
+        .limit(500)
+    ).all()
     return [security_event_response(db, event) for event in events]
 
 

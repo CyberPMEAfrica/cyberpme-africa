@@ -31,7 +31,7 @@ function NavIcon({ name }) {
 export const pageNames = Object.fromEntries(navigation.map((item) => [item.id, item.label]));
 export const activePages = navigation.filter((item) => !item.upcoming).map((item) => item.id);
 
-export default function AppShell({ activePage, onNavigate, apiOnline, isRefreshing, lastUpdated, onRefresh, children }) {
+export default function AppShell({ activePage, onNavigate, apiOnline, isRefreshing, lastUpdated, onRefresh, currentUser, onLogout, children }) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   function navigate(page) {
@@ -66,7 +66,9 @@ export default function AppShell({ activePage, onNavigate, apiOnline, isRefreshi
           <div className="topbar-actions">
             <span className={`api-health ${apiOnline ? "online" : "offline"}`}><i/>{apiOnline ? "API connectée" : "API indisponible"}</span>
             <button onClick={onRefresh} disabled={isRefreshing}>{isRefreshing ? "Actualisation..." : "Actualiser"}</button>
-            <div className="user-avatar" title="CyberPME Africa">CP</div>
+            <button className="user-avatar" title={`${currentUser?.email} · Déconnexion`} onClick={onLogout}>
+              {currentUser?.email?.slice(0, 2).toUpperCase() || "CP"}
+            </button>
           </div>
         </header>
         <div className="update-line" aria-live="polite">

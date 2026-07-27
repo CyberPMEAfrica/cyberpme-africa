@@ -5,12 +5,18 @@ from uuid import uuid4
 os.environ["DATABASE_URL"] = "sqlite:///./cyberpme_test.db"
 os.environ["AGENT_ENROLLMENT_KEY"] = "ci-enrollment-secret"
 os.environ["NETWORK_SCAN_KEY"] = "ci-network-scan-secret"
+os.environ["BOOTSTRAP_ORGANIZATION_NAME"] = "PME Test"
+os.environ["BOOTSTRAP_ORGANIZATION_SLUG"] = "pme-test"
+os.environ["BOOTSTRAP_ADMIN_EMAIL"] = "owner@example.test"
+os.environ["BOOTSTRAP_ADMIN_PASSWORD"] = "Test-password-very-strong-2026"
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.database import Base, engine
+from app.auth import hash_password
+from app.database import Base, SessionLocal, engine
 from app.main import app
+from app.models import Organization, User
 
 
 @pytest.fixture(autouse=True)
@@ -26,13 +32,80 @@ def client():
         yield test_client
 
 
+@pytest.fixture
+def user_headers(client: TestClient):
+    response = client.post(
+        "/api/v1/auth/login",
+        json={
+            "organization_slug": "pme-test",
+            "email": "owner@example.test",
+            "password": "Test-password-very-strong-2026",
+        },
+    )
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
 def test_health(client: TestClient):
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
 
 
-def test_server_metrics_and_alert_lifecycle(client: TestClient):
+def test_owner_login_session_and_logout(client: TestClient):
+    credentials = {
+        "organization_slug": "pme-test",
+        "email": "owner@example.test",
+        "password": "Test-password-very-strong-2026",
+    }
+    invalid = client.post("/api/v1/auth/login", json=credentials | {"password": "wrong-password-2026"})
+    assert invalid.status_code == 401
+    login_response = client.post("/api/v1/auth/login", json=credentials)
+    assert login_response.status_code == 200
+    token = login_response.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    profile = client.get("/api/v1/auth/me", headers=headers)
+    assert profile.status_code == 200
+    assert profile.json()["organization_name"] == "PME Test"
+    assert profile.json()["role"] == "owner"
+    assert client.post("/api/v1/auth/logout", headers=headers).status_code == 204
+    assert client.get("/api/v1/auth/me", headers=headers).status_code == 401
+
+
+def test_organizations_cannot_read_each_others_servers(client: TestClient, user_headers: dict[str, str]):
+    with SessionLocal() as db:
+        other = Organization(name="Autre PME", slug="autre-pme")
+        db.add(other)
+        db.flush()
+        db.add(
+            User(
+                organization_id=other.id,
+                email="owner@autre.test",
+                password_hash=hash_password("Another-strong-password-2026"),
+                role="owner",
+            )
+        )
+        db.commit()
+    login = client.post(
+        "/api/v1/auth/login",
+        json={
+            "organization_slug": "autre-pme",
+            "email": "owner@autre.test",
+            "password": "Another-strong-password-2026",
+        },
+    ).json()
+    other_headers = {"Authorization": f"Bearer {login['access_token']}"}
+    created = client.post(
+        "/api/v1/servers",
+        json={"name": "Serveur privé", "hostname": "private-host", "ip_address": "10.10.0.2"},
+        headers=other_headers,
+    )
+    assert created.status_code == 201
+    assert len(client.get("/api/v1/servers", headers=other_headers).json()) == 1
+    assert client.get("/api/v1/servers", headers=user_headers).json() == []
+
+
+def test_server_metrics_and_alert_lifecycle(client: TestClient, user_headers: dict[str, str]):
     hostname = f"ci-server-{uuid4().hex[:8]}"
     registration_response = client.post(
         "/api/v1/agents/register",
@@ -57,7 +130,8 @@ def test_server_metrics_and_alert_lifecycle(client: TestClient):
     )
     assert critical_response.status_code == 201
 
-    active_alerts = client.get("/api/v1/alerts").json()
+    assert client.get("/api/v1/alerts").status_code == 401
+    active_alerts = client.get("/api/v1/alerts", headers=user_headers).json()
     assert {(alert["resource"], alert["severity"]) for alert in active_alerts} == {
         ("cpu", "critical"),
         ("memory", "warning"),
@@ -69,14 +143,14 @@ def test_server_metrics_and_alert_lifecycle(client: TestClient):
         headers=auth_headers,
     )
     assert recovery_response.status_code == 201
-    assert client.get("/api/v1/alerts").json() == []
+    assert client.get("/api/v1/alerts", headers=user_headers).json() == []
 
-    history = client.get("/api/v1/alerts?active_only=false").json()
+    history = client.get("/api/v1/alerts?active_only=false", headers=user_headers).json()
     assert len(history) == 2
     assert all(alert["status"] == "resolved" for alert in history)
 
 
-def test_network_scan_requires_key_and_private_limited_target(client: TestClient, monkeypatch):
+def test_network_scan_requires_key_and_private_limited_target(client: TestClient, monkeypatch, user_headers: dict[str, str]):
     unauthorized = client.post("/api/v1/network-scans", json={"target": "192.168.1.0/24"})
     assert unauthorized.status_code == 401
 
@@ -93,12 +167,12 @@ def test_network_scan_requires_key_and_private_limited_target(client: TestClient
     assert accepted.json()["target"] == "192.168.1.0/24"
     assert accepted.json()["status"] == "pending"
 
-    history = client.get("/api/v1/network-scans")
+    history = client.get("/api/v1/network-scans", headers=user_headers)
     assert history.status_code == 200
     assert len(history.json()) == 1
 
 
-def test_ssl_check_requires_key_and_records_result(client: TestClient, monkeypatch):
+def test_ssl_check_requires_key_and_records_result(client: TestClient, monkeypatch, user_headers: dict[str, str]):
     unauthorized = client.post("/api/v1/ssl-checks", json={"hostname": "example.com", "port": 443})
     assert unauthorized.status_code == 401
     headers = {"X-Scan-Key": "ci-network-scan-secret"}
@@ -117,10 +191,10 @@ def test_ssl_check_requires_key_and_records_result(client: TestClient, monkeypat
     assert response.status_code == 201
     assert response.json()["status"] == "valid"
     assert response.json()["days_remaining"] == 59
-    assert len(client.get("/api/v1/ssl-checks").json()) == 1
+    assert len(client.get("/api/v1/ssl-checks", headers=user_headers).json()) == 1
 
 
-def test_backup_checks_require_agent_and_evaluate_freshness(client: TestClient):
+def test_backup_checks_require_agent_and_evaluate_freshness(client: TestClient, user_headers: dict[str, str]):
     registration = client.post(
         "/api/v1/agents/register",
         json={"name": "Serveur sauvegarde", "hostname": f"backup-{uuid4().hex}", "ip_address": "127.0.0.1"},
@@ -141,10 +215,10 @@ def test_backup_checks_require_agent_and_evaluate_freshness(client: TestClient):
     stale = payload | {"name": "PostgreSQL", "kind": "postgresql", "last_success_at": (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()}
     response = client.post(endpoint, json=stale, headers={"Authorization": f"Bearer {registration['agent_token']}"})
     assert response.json()["status"] == "critical"
-    assert len(client.get("/api/v1/backup-checks").json()) == 2
+    assert len(client.get("/api/v1/backup-checks", headers=user_headers).json()) == 2
 
 
-def test_security_event_ingestion_is_authenticated_and_idempotent(client: TestClient):
+def test_security_event_ingestion_is_authenticated_and_idempotent(client: TestClient, user_headers: dict[str, str]):
     registration = client.post(
         "/api/v1/agents/register",
         json={"name": "Capteur IDS", "hostname": f"ids-{uuid4().hex}", "ip_address": "10.0.2.15"},
@@ -166,4 +240,4 @@ def test_security_event_ingestion_is_authenticated_and_idempotent(client: TestCl
     assert created.json()["id"] == duplicate.json()["id"]
     assert created.json()["server_name"] == "Capteur IDS"
     assert "multifacteur" in created.json()["recommendation"]
-    assert len(client.get("/api/v1/security-events").json()) == 1
+    assert len(client.get("/api/v1/security-events", headers=user_headers).json()) == 1

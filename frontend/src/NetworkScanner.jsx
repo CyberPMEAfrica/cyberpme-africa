@@ -7,7 +7,7 @@ const statusLabels = {
   failed: "Échec",
 };
 
-export default function NetworkScanner({ apiUrl, scans, onCreated }) {
+export default function NetworkScanner({ apiUrl, token, scans, onCreated }) {
   const [target, setTarget] = useState("192.168.1.0/24");
   const [scanKey, setScanKey] = useState("");
   const [authorized, setAuthorized] = useState(false);
@@ -26,7 +26,7 @@ export default function NetworkScanner({ apiUrl, scans, onCreated }) {
     try {
       const response = await fetch(`${apiUrl}/api/v1/network-scans`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-Scan-Key": scanKey },
+        headers: { "Content-Type": "application/json", "X-Scan-Key": scanKey, Authorization: `Bearer ${token}` },
         body: JSON.stringify({ target }),
       });
       const data = await response.json();
@@ -38,6 +38,19 @@ export default function NetworkScanner({ apiUrl, scans, onCreated }) {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  async function downloadReport() {
+    const response = await fetch(`${apiUrl}/api/v1/network-scans/${latest.id}/report`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) { setMessage("Impossible de télécharger le rapport."); return; }
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `audit-reseau-${latest.id}.pdf`;
+    link.click();
+    URL.revokeObjectURL(url);
   }
 
   return (
@@ -78,9 +91,9 @@ export default function NetworkScanner({ apiUrl, scans, onCreated }) {
                 <em className={`scan-status ${latest.status}`}>{statusLabels[latest.status]}</em>
               </div>
               {latest.status === "completed" && (
-                <a className="report-link" href={`${apiUrl}/api/v1/network-scans/${latest.id}/report`}>
+                <button type="button" className="report-link" onClick={downloadReport}>
                   Télécharger le rapport PDF
-                </a>
+                </button>
               )}
               {latest.error && <p className="error">{latest.error}</p>}
               {latest.status === "completed" && !latest.results.length && <p className="scan-note">Aucun équipement actif détecté.</p>}

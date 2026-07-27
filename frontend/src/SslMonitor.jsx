@@ -12,7 +12,7 @@ function formatDate(value) {
   return value ? new Intl.DateTimeFormat("fr-FR", { dateStyle: "medium" }).format(new Date(value)) : "—";
 }
 
-export default function SslMonitor({ apiUrl, checks, onCreated }) {
+export default function SslMonitor({ apiUrl, token, checks, onCreated }) {
   const [hostname, setHostname] = useState("");
   const [port, setPort] = useState("443");
   const [scanKey, setScanKey] = useState("");
@@ -26,7 +26,7 @@ export default function SslMonitor({ apiUrl, checks, onCreated }) {
     try {
       const response = await fetch(`${apiUrl}/api/v1/ssl-checks`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-Scan-Key": scanKey },
+        headers: { "Content-Type": "application/json", "X-Scan-Key": scanKey, Authorization: `Bearer ${token}` },
         body: JSON.stringify({ hostname, port: Number(port) }),
       });
       const data = await response.json();
