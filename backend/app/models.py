@@ -11,9 +11,11 @@ def utc_now() -> datetime:
 
 class Server(Base):
     __tablename__ = "servers"
+    __table_args__ = (UniqueConstraint("organization_id", "hostname", name="uq_server_organization_hostname"),)
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    organization_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(120))
-    hostname: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    hostname: Mapped[str] = mapped_column(String(255), index=True)
     ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="unknown")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
@@ -60,6 +62,7 @@ class AgentCredential(Base):
 class NetworkScan(Base):
     __tablename__ = "network_scans"
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    organization_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
     target: Mapped[str] = mapped_column(String(64), index=True)
     status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
     results: Mapped[list[dict]] = mapped_column(JSON, default=list)
@@ -72,6 +75,7 @@ class NetworkScan(Base):
 class SslCheck(Base):
     __tablename__ = "ssl_checks"
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    organization_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
     hostname: Mapped[str] = mapped_column(String(253), index=True)
     port: Mapped[int]
     status: Mapped[str] = mapped_column(String(20), index=True)
@@ -128,6 +132,8 @@ class Organization(Base):
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     name: Mapped[str] = mapped_column(String(120))
     slug: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    enrollment_key_hash: Mapped[str | None] = mapped_column(String(64))
+    scan_key_hash: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
