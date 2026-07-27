@@ -15,7 +15,7 @@ from app.config import settings
 from app.auth import hash_password, hash_session_token, issue_session_token, verify_password
 from app.database import Base, engine, get_db
 from app.email_notifications import send_alert_email
-from app.models import AgentCredential, Alert, BackupCheck, Metric, NetworkScan, Organization, SecurityEvent, Server, SslCheck, User, UserSession
+from app.models import AgentCredential, Alert, BackupCheck, IdsConnector, Metric, NetworkScan, Organization, SecurityEvent, Server, SslCheck, User, UserSession
 from app.network_scanner import run_network_scan, validate_private_target
 from app.network_report import build_network_scan_pdf
 from app.schemas import (
@@ -24,6 +24,9 @@ from app.schemas import (
     AlertRead,
     BackupCheckCreate,
     BackupCheckRead,
+    IdsConnectorCreate,
+    IdsConnectorCreated,
+    IdsConnectorRead,
     MetricCreate,
     MetricRead,
     NetworkScanCreate,
@@ -169,6 +172,17 @@ def security_event_response(db: Session, event: SecurityEvent) -> SecurityEventR
     data = SecurityEventRead.model_validate(event)
     server = db.get(Server, event.server_id)
     return data.model_copy(update={"server_name": server.name if server else ""})
+
+
+def ids_connector_response(db: Session, connector: IdsConnector) -> IdsConnectorRead:
+    data = IdsConnectorRead.model_validate(connector)
+    server = db.get(Server, connector.server_id)
+    return data.model_copy(update={"server_name": server.name if server else ""})
+
+
+def require_role(user: User, *roles: str) -> None:
+    if user.role not in roles:
+        raise HTTPException(status_code=403, detail="Droits insuffisants pour cette action.")
 
 
 SECURITY_RECOMMENDATIONS = {
@@ -553,6 +567,122 @@ def list_security_events(
         .limit(500)
     ).all()
     return [security_event_response(db, event) for event in events]
+
+
+@app.get("/api/v1/ids-connectors", response_model=list[IdsConnectorRead])
+def list_ids_connectors(
+    context: tuple[User, Organization] = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> list[IdsConnectorRead]:
+    _, organization = context
+    connectors = db.scalars(
+        select(IdsConnector)
+        .where(IdsConnector.organization_id == organization.id)
+        .order_by(IdsConnector.created_at.desc())
+    ).all()
+    return [ids_connector_response(db, connector) for connector in connectors]
+
+
+@app.post("/api/v1/ids-connectors", response_model=IdsConnectorCreated, status_code=status.HTTP_201_CREATED)
+def create_ids_connector(
+    payload: IdsConnectorCreate,
+    context: tuple[User, Organization] = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> IdsConnectorCreated:
+    user, organization = context
+    require_role(user, "owner", "admin")
+    server = db.scalar(
+        select(Server).where(Server.id == payload.server_id, Server.organization_id == organization.id)
+    )
+    if server is None:
+        raise HTTPException(status_code=404, detail="Serveur introuvable dans cette organisation.")
+    raw_token = secrets.token_urlsafe(48)
+    connector = IdsConnector(
+        organization_id=organization.id,
+        server_id=server.id,
+        name=payload.name,
+        connector_type=payload.connector_type,
+        token_hash=token_hash(raw_token),
+    )
+    db.add(connector)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Un connecteur porte déjà ce nom.")
+    db.refresh(connector)
+    data = ids_connector_response(db, connector)
+    return IdsConnectorCreated(
+        **data.model_dump(),
+        ingest_token=raw_token,
+        ingest_path=f"/api/v1/ids-connectors/{connector.id}/events",
+    )
+
+
+@app.delete("/api/v1/ids-connectors/{connector_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_ids_connector(
+    connector_id: UUID,
+    context: tuple[User, Organization] = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    user, organization = context
+    require_role(user, "owner", "admin")
+    connector = db.scalar(
+        select(IdsConnector).where(
+            IdsConnector.id == connector_id,
+            IdsConnector.organization_id == organization.id,
+        )
+    )
+    if connector is None:
+        raise HTTPException(status_code=404, detail="Connecteur introuvable.")
+    db.delete(connector)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.post(
+    "/api/v1/ids-connectors/{connector_id}/events",
+    response_model=SecurityEventRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def ingest_ids_connector_event(
+    connector_id: UUID,
+    payload: SecurityEventCreate,
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+) -> SecurityEventRead:
+    connector = db.get(IdsConnector, connector_id)
+    if connector is None or connector.status != "active":
+        raise HTTPException(status_code=404, detail="Connecteur introuvable ou désactivé.")
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Jeton du connecteur requis.")
+    supplied_hash = token_hash(authorization.removeprefix("Bearer ").strip())
+    if not hmac.compare_digest(supplied_hash, connector.token_hash):
+        raise HTTPException(status_code=401, detail="Jeton du connecteur invalide.")
+    if payload.source != connector.connector_type and connector.connector_type != "other":
+        raise HTTPException(status_code=422, detail="La source ne correspond pas au type du connecteur.")
+    existing = db.scalar(
+        select(SecurityEvent).where(
+            SecurityEvent.server_id == connector.server_id,
+            SecurityEvent.event_key == payload.event_key,
+        )
+    )
+    if existing:
+        return security_event_response(db, existing)
+    recommendation = SECURITY_RECOMMENDATIONS.get(
+        payload.category.lower(),
+        "Analysez l’événement, confirmez son origine et documentez toute action avant d’appliquer un blocage.",
+    )
+    event = SecurityEvent(
+        server_id=connector.server_id,
+        recommendation=recommendation,
+        **payload.model_dump(),
+    )
+    connector.last_event_at = datetime.now(timezone.utc)
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+    return security_event_response(db, event)
 
 
 @app.post("/api/v1/servers/{server_id}/metrics", response_model=MetricRead, status_code=status.HTTP_201_CREATED)
