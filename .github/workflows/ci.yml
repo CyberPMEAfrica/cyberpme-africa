@@ -49,6 +49,23 @@ jobs:
           SMTP_PORT: "1025"
         run: pytest -q
 
+  integrations:
+    name: Tests intégrations IDS
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Installer pytest
+        run: pip install pytest
+      - name: Tester les adaptateurs
+        run: pytest -q integrations/tests
+      - name: Vérifier le configurateur Wazuh
+        run: bash -n integrations/wazuh/configure-cyberpme
+
   frontend:
     name: Build frontend
     runs-on: ubuntu-latest
