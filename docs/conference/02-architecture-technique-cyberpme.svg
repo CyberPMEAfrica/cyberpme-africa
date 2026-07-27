@@ -1,0 +1,114 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <defs>
+    <linearGradient id="bg2" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#061725"/><stop offset="1" stop-color="#0b2c37"/></linearGradient>
+    <linearGradient id="cloud" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0b2b3a"/><stop offset="1" stop-color="#103b36"/></linearGradient>
+    <marker id="a2" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0 0v6l9-3z" fill="#2de0a7"/></marker>
+    <marker id="a2b" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0 0v6l9-3z" fill="#65dfff"/></marker>
+    <style>
+      .title{font:700 43px 'Segoe UI',Arial;fill:#f2f8fb}.subtitle{font:400 19px 'Segoe UI',Arial;fill:#8eb0c0}
+      .label{font:700 13px 'Segoe UI',Arial;fill:#2de0a7;letter-spacing:3px}.h2{font:700 22px 'Segoe UI',Arial;fill:#f2f8fb}
+      .body{font:400 16px 'Segoe UI',Arial;fill:#b8ccd6}.small{font:400 13px 'Segoe UI',Arial;fill:#7895a5}
+      .zone{fill:#091e2c;stroke:#24495a;stroke-width:2}.node{fill:#0c2a39;stroke:#2c596a;stroke-width:1.5}
+      .green{fill:#0e332f;stroke:#2b8b72;stroke-width:1.5}.planned{fill:#272819;stroke:#ffc857;stroke-width:1.5;stroke-dasharray:8 7}
+      .flow{fill:none;stroke:#2de0a7;stroke-width:3;marker-end:url(#a2)}.data{fill:none;stroke:#65dfff;stroke-width:2.5;marker-end:url(#a2b)}
+      .thin{fill:none;stroke:#315565;stroke-width:2}
+    </style>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#bg2)"/>
+  <g transform="translate(78 54)">
+    <rect width="54" height="54" rx="15" fill="#2de0a7"/><text x="27" y="35" text-anchor="middle" font-family="Segoe UI,Arial" font-size="20" font-weight="800" fill="#041b21">CA</text>
+    <text x="73" y="24" font-family="Segoe UI,Arial" font-size="22" font-weight="750" fill="#f2f8fb">CyberPME</text><text x="73" y="46" font-family="Segoe UI,Arial" font-size="10" font-weight="700" letter-spacing="5" fill="#2de0a7">AFRICA</text>
+  </g>
+  <text x="78" y="158" class="label">MAQUETTE D’ARCHITECTURE CIBLE</text>
+  <text x="78" y="211" class="title">Une plateforme cloud, plusieurs PME, des capteurs indépendants</text>
+  <text x="78" y="247" class="subtitle">Architecture multi-tenant adaptable aux infrastructures Windows, Linux, réseau et SIEM</text>
+
+  <!-- Client -->
+  <g transform="translate(70 310)">
+    <rect class="zone" width="425" height="650" rx="28"/>
+    <text x="30" y="44" class="label">SITE DE LA PME</text>
+    <text x="30" y="82" class="h2">Infrastructure cliente</text>
+    <text x="30" y="111" class="small">Aucun composant du laboratoire n’est obligatoire</text>
+
+    <rect class="node" x="28" y="145" width="176" height="105" rx="17"/>
+    <text x="48" y="180" class="h2" font-size="19">Serveurs</text><text x="48" y="210" class="body">Windows • Linux</text><text x="48" y="232" class="small">CPU / RAM / disque</text>
+    <rect class="node" x="220" y="145" width="176" height="105" rx="17"/>
+    <text x="240" y="180" class="h2" font-size="19">Actifs web</text><text x="240" y="210" class="body">Domaines • TLS</text><text x="240" y="232" class="small">Ports et certificats</text>
+
+    <rect class="green" x="28" y="270" width="368" height="112" rx="18"/>
+    <text x="52" y="306" class="h2">Agent CyberPME</text>
+    <text x="52" y="335" class="body">Collecte locale + jeton individuel</text>
+    <text x="52" y="360" class="small">Windows / Linux • configuration par machine</text>
+
+    <rect class="green" x="28" y="402" width="176" height="105" rx="17"/>
+    <text x="48" y="437" class="h2" font-size="19">Wazuh</text><text x="48" y="466" class="body">Adaptateur push</text><text x="48" y="488" class="small">Événements JSON</text>
+    <rect class="planned" x="220" y="402" width="176" height="105" rx="17"/>
+    <text x="240" y="437" class="h2" font-size="19">Suricata</text><text x="240" y="466" class="body">Adaptateur prévu</text><text x="240" y="488" class="small">IDS réseau</text>
+
+    <rect class="planned" x="28" y="527" width="368" height="94" rx="17"/>
+    <text x="52" y="562" class="h2" font-size="19">Scanner &amp; actions locales</text>
+    <text x="52" y="591" class="body">File hors ligne • simulation IPS • retour arrière</text>
+  </g>
+
+  <!-- Secure transport -->
+  <g transform="translate(530 420)">
+    <rect width="225" height="310" rx="24" fill="#081d28" stroke="#2b5b67" stroke-width="2"/>
+    <text x="112" y="44" text-anchor="middle" class="label">INTERNET</text>
+    <circle cx="112" cy="108" r="47" fill="#10372f" stroke="#2de0a7" stroke-width="2"/>
+    <path d="M92 109h40M112 89v40M80 109h64M87 94c15 10 35 10 50 0M87 124c15-10 35-10 50 0" fill="none" stroke="#2de0a7" stroke-width="2"/>
+    <text x="112" y="181" text-anchor="middle" class="h2">HTTPS / API</text>
+    <text x="112" y="214" text-anchor="middle" class="body">Sessions utilisateurs</text>
+    <text x="112" y="240" text-anchor="middle" class="body">Jetons agents</text>
+    <text x="112" y="266" text-anchor="middle" class="body">Jetons connecteurs</text>
+    <text x="112" y="292" text-anchor="middle" class="small">Chiffrement en transit</text>
+  </g>
+
+  <!-- Cloud -->
+  <g transform="translate(795 292)">
+    <rect width="1055" height="685" rx="32" fill="url(#cloud)" stroke="#347064" stroke-width="2.5"/>
+    <text x="34" y="48" class="label">CYBERPME AFRICA • CLOUD SAAS</text>
+    <text x="34" y="85" class="h2">Plan de contrôle multi-tenant</text>
+
+    <rect class="green" x="34" y="122" width="292" height="118" rx="19"/>
+    <text x="58" y="158" class="h2">Frontend React</text><text x="58" y="188" class="body">Dashboard &amp; rapports</text><text x="58" y="214" class="small">Owner • Admin • Analyst • Viewer</text>
+    <rect class="green" x="353" y="122" width="292" height="118" rx="19"/>
+    <text x="377" y="158" class="h2">API FastAPI</text><text x="377" y="188" class="body">Authentification &amp; politiques</text><text x="377" y="214" class="small">Isolation appliquée à chaque requête</text>
+    <rect class="planned" x="672" y="122" width="349" height="118" rx="19"/>
+    <text x="696" y="158" class="h2">Passerelle de production</text><text x="696" y="188" class="body">Domaine • TLS • WAF • quotas</text><text x="696" y="214" class="small">Prochaine étape de déploiement</text>
+
+    <text x="34" y="285" class="label">SERVICES MÉTIER</text>
+    <g transform="translate(34 310)">
+      <rect class="node" width="182" height="98" rx="16"/><text x="20" y="37" class="h2" font-size="18">Monitoring</text><text x="20" y="67" class="small">Métriques &amp; seuils</text>
+      <rect class="node" x="198" width="182" height="98" rx="16"/><text x="218" y="37" class="h2" font-size="18">Audits</text><text x="218" y="67" class="small">Réseau • SSL • PDF</text>
+      <rect class="node" x="396" width="182" height="98" rx="16"/><text x="416" y="37" class="h2" font-size="18">Sauvegardes</text><text x="416" y="67" class="small">Fraîcheur &amp; état</text>
+      <rect class="node" x="594" width="182" height="98" rx="16"/><text x="614" y="37" class="h2" font-size="18">IDS</text><text x="614" y="67" class="small">Normalisation SIEM</text>
+      <rect class="node" x="792" width="195" height="98" rx="16"/><text x="812" y="37" class="h2" font-size="18">Incidents</text><text x="812" y="67" class="small">Suivi &amp; résolution</text>
+    </g>
+
+    <text x="34" y="458" class="label">DONNÉES &amp; INTÉGRATIONS</text>
+    <g transform="translate(34 483)">
+      <rect class="green" width="303" height="116" rx="18"/>
+      <ellipse cx="44" cy="35" rx="18" ry="8" fill="none" stroke="#65dfff" stroke-width="2"/><path d="M26 35v28c0 10 36 10 36 0V35" fill="none" stroke="#65dfff" stroke-width="2"/>
+      <text x="82" y="39" class="h2">PostgreSQL</text><text x="24" y="82" class="body">Organisations • actifs • incidents</text><text x="24" y="104" class="small">Clé de tenant sur toutes les données métier</text>
+
+      <rect class="planned" x="327" width="303" height="116" rx="18"/>
+      <text x="351" y="39" class="h2">Journal d’audit</text><text x="351" y="69" class="body">Actions immuables</text><text x="351" y="94" class="small">Utilisateur • date • avant / après</text>
+
+      <rect class="planned" x="654" width="333" height="116" rx="18"/>
+      <text x="678" y="39" class="h2">Services externes</text><text x="678" y="69" class="body">E-mail • WhatsApp • stockage</text><text x="678" y="94" class="small">Facturation et support ensuite</text>
+    </g>
+  </g>
+
+  <!-- arrows -->
+  <path class="flow" d="M495 575H522"/>
+  <path class="flow" d="M755 575H785"/>
+  <path class="data" d="M1121 532V601"/>
+  <path class="thin" d="M975 532V601M1319 532V601M1517 532V601"/>
+
+  <!-- legend -->
+  <g transform="translate(78 1018)">
+    <rect width="16" height="16" rx="4" fill="#0e332f" stroke="#2b8b72"/><text x="28" y="14" class="small">Opérationnel</text>
+    <rect x="150" width="16" height="16" rx="4" fill="#272819" stroke="#ffc857" stroke-dasharray="4 3"/><text x="178" y="14" class="small">Évolution planifiée</text>
+    <text x="1455" y="14" class="small">Architecture indépendante du laboratoire</text>
+  </g>
+</svg>

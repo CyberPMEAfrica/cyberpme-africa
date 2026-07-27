@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <defs>
+    <linearGradient id="bg3" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#061725"/><stop offset="1" stop-color="#0d3038"/></linearGradient>
+    <marker id="a3" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0 0v6l9-3z" fill="#2de0a7"/></marker>
+    <marker id="a3b" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0 0v6l9-3z" fill="#65dfff"/></marker>
+    <style>
+      .title{font:700 43px 'Segoe UI',Arial;fill:#f2f8fb}.subtitle{font:400 19px 'Segoe UI',Arial;fill:#8eb0c0}
+      .label{font:700 13px 'Segoe UI',Arial;fill:#2de0a7;letter-spacing:3px}.h2{font:700 20px 'Segoe UI',Arial;fill:#f2f8fb}
+      .body{font:400 16px 'Segoe UI',Arial;fill:#b8ccd6}.small{font:400 13px 'Segoe UI',Arial;fill:#7895a5}
+      .actor{fill:#0b2837;stroke:#2c596a;stroke-width:1.5}.actor2{fill:#0f382f;stroke:#2b8b72;stroke-width:1.5}
+      .life{stroke:#315565;stroke-width:2;stroke-dasharray:7 7}.msg{stroke:#2de0a7;stroke-width:3;marker-end:url(#a3)}
+      .return{stroke:#65dfff;stroke-width:2.5;stroke-dasharray:8 6;marker-end:url(#a3b)}
+      .phase{fill:#0a202e;stroke:#1d4657;stroke-width:1.5}.note{fill:#26301e;stroke:#ffc857;stroke-width:1.5}
+    </style>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#bg3)"/>
+  <g transform="translate(78 54)">
+    <rect width="54" height="54" rx="15" fill="#2de0a7"/><text x="27" y="35" text-anchor="middle" font-family="Segoe UI,Arial" font-size="20" font-weight="800" fill="#041b21">CA</text>
+    <text x="73" y="24" font-family="Segoe UI,Arial" font-size="22" font-weight="750" fill="#f2f8fb">CyberPME</text><text x="73" y="46" font-family="Segoe UI,Arial" font-size="10" font-weight="700" letter-spacing="5" fill="#2de0a7">AFRICA</text>
+  </g>
+  <text x="78" y="158" class="label">DIAGRAMME UML DE SÉQUENCE</text>
+  <text x="78" y="211" class="title">De l’attaque détectée à l’incident résolu</text>
+  <text x="78" y="247" class="subtitle">Exemple réel validé : tentative SSH → règle Wazuh 5712 → traitement CyberPME</text>
+
+  <!-- actors -->
+  <g transform="translate(80 300)">
+    <rect class="actor" width="250" height="88" rx="18"/><text x="125" y="37" text-anchor="middle" class="h2">Infrastructure PME</text><text x="125" y="64" text-anchor="middle" class="small">Serveur / poste / réseau</text>
+    <line x1="125" y1="88" x2="125" y2="660" class="life"/>
+  </g>
+  <g transform="translate(390 300)">
+    <rect class="actor" width="250" height="88" rx="18"/><text x="125" y="37" text-anchor="middle" class="h2">Wazuh</text><text x="125" y="64" text-anchor="middle" class="small">Moteur de détection</text>
+    <line x1="125" y1="88" x2="125" y2="660" class="life"/>
+  </g>
+  <g transform="translate(700 300)">
+    <rect class="actor" width="250" height="88" rx="18"/><text x="125" y="37" text-anchor="middle" class="h2">Adaptateur</text><text x="125" y="64" text-anchor="middle" class="small">custom-cyberpme</text>
+    <line x1="125" y1="88" x2="125" y2="660" class="life"/>
+  </g>
+  <g transform="translate(1010 300)">
+    <rect class="actor2" width="250" height="88" rx="18"/><text x="125" y="37" text-anchor="middle" class="h2">API CyberPME</text><text x="125" y="64" text-anchor="middle" class="small">Connecteur de la PME</text>
+    <line x1="125" y1="88" x2="125" y2="660" class="life"/>
+  </g>
+  <g transform="translate(1320 300)">
+    <rect class="actor2" width="250" height="88" rx="18"/><text x="125" y="37" text-anchor="middle" class="h2">Données isolées</text><text x="125" y="64" text-anchor="middle" class="small">PostgreSQL • tenant</text>
+    <line x1="125" y1="88" x2="125" y2="660" class="life"/>
+  </g>
+  <g transform="translate(1630 300)">
+    <rect class="actor" width="210" height="88" rx="18"/><text x="105" y="37" text-anchor="middle" class="h2">Analyste</text><text x="105" y="64" text-anchor="middle" class="small">Dashboard sécurisé</text>
+    <line x1="105" y1="88" x2="105" y2="660" class="life"/>
+  </g>
+
+  <!-- phase 1 -->
+  <rect x="58" y="422" width="1800" height="146" rx="18" class="phase" opacity=".68"/>
+  <text x="78" y="449" class="label">1 • DÉTECTION &amp; NORMALISATION</text>
+  <line x1="205" y1="480" x2="505" y2="480" class="msg"/>
+  <text x="355" y="470" text-anchor="middle" class="body">Échec SSH répété</text>
+  <line x1="515" y1="526" x2="815" y2="526" class="msg"/>
+  <text x="665" y="516" text-anchor="middle" class="body">Alerte règle 5712 • niveau 10</text>
+  <rect x="734" y="548" width="182" height="38" rx="10" class="note"/>
+  <text x="825" y="573" text-anchor="middle" class="small" fill="#ffc857">Format CyberPME commun</text>
+
+  <!-- phase 2 -->
+  <rect x="58" y="596" width="1800" height="156" rx="18" class="phase" opacity=".68"/>
+  <text x="78" y="623" class="label">2 • INGESTION SÉCURISÉE</text>
+  <line x1="825" y1="655" x2="1125" y2="655" class="msg"/>
+  <text x="975" y="645" text-anchor="middle" class="body">POST événement + jeton dédié</text>
+  <line x1="1135" y1="700" x2="1435" y2="700" class="msg"/>
+  <text x="1285" y="690" text-anchor="middle" class="body">Vérifie organisation + idempotence</text>
+  <line x1="1445" y1="731" x2="1145" y2="731" class="return"/>
+  <text x="1295" y="723" text-anchor="middle" class="small">Incident créé : « Nouveau »</text>
+
+  <!-- phase 3 -->
+  <rect x="58" y="780" width="1800" height="184" rx="18" class="phase" opacity=".68"/>
+  <text x="78" y="807" class="label">3 • TRAITEMENT HUMAIN &amp; TRAÇABILITÉ</text>
+  <line x1="1735" y1="842" x2="1145" y2="842" class="msg"/>
+  <text x="1440" y="831" text-anchor="middle" class="body">Prendre en charge</text>
+  <line x1="1135" y1="875" x2="1435" y2="875" class="msg"/>
+  <text x="1285" y="865" text-anchor="middle" class="small">Responsable + date</text>
+  <line x1="1735" y1="914" x2="1145" y2="914" class="msg"/>
+  <text x="1440" y="904" text-anchor="middle" class="body">Résoudre + commentaire obligatoire</text>
+  <line x1="1135" y1="947" x2="1435" y2="947" class="msg"/>
+  <text x="1285" y="938" text-anchor="middle" class="small">État « Résolu » conservé dans l’historique</text>
+
+  <g transform="translate(78 1016)">
+    <circle cx="7" cy="7" r="7" fill="#2de0a7"/><text x="28" y="13" class="small">Aucun blocage automatique • validation humaine avant toute future action IPS</text>
+    <text x="1450" y="13" class="small">CyberPME Africa • Flux incident</text>
+  </g>
+</svg>
