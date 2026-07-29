@@ -49,7 +49,8 @@ def test_migration_creates_a_fresh_schema_and_is_idempotent(tmp_path):
     with engine.connect() as connection:
         assert connection.exec_driver_sql(
             "SELECT version_num FROM alembic_version"
-        ).scalar_one() == "20260729_0001"
+        ).scalar_one() == "20260729_0002"
+    assert {column["name"] for column in inspector.get_columns("users")} >= {"theme"}
     engine.dispose()
 
 
@@ -71,6 +72,9 @@ def test_migration_adopts_existing_schema_without_losing_data(tmp_path):
         )
         db.commit()
 
+    with engine.begin() as connection:
+        connection.exec_driver_sql("ALTER TABLE users DROP COLUMN theme")
+
     upgrade_database(database_url)
 
     with Session(engine) as db:
@@ -79,11 +83,13 @@ def test_migration_adopts_existing_schema_without_losing_data(tmp_path):
         )
         assert organization is not None
         assert organization.name == "PME existante"
-        assert db.scalar(
+        existing_user = db.scalar(
             select(User).where(User.organization_id == organization.id)
-        ).email == "owner@existante.test"
+        )
+        assert existing_user.email == "owner@existante.test"
+        assert existing_user.theme == "dark"
     with engine.connect() as connection:
         assert connection.exec_driver_sql(
             "SELECT version_num FROM alembic_version"
-        ).scalar_one() == "20260729_0001"
+        ).scalar_one() == "20260729_0002"
     engine.dispose()

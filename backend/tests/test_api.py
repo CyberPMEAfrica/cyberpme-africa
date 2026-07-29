@@ -70,8 +70,35 @@ def test_owner_login_session_and_logout(client: TestClient):
     assert profile.status_code == 200
     assert profile.json()["organization_name"] == "PME Test"
     assert profile.json()["role"] == "owner"
+    assert profile.json()["theme"] == "dark"
     assert client.post("/api/v1/auth/logout", headers=headers).status_code == 204
     assert client.get("/api/v1/auth/me", headers=headers).status_code == 401
+
+
+def test_user_theme_is_validated_persisted_and_audited(
+    client: TestClient,
+    user_headers: dict[str, str],
+):
+    updated = client.patch(
+        "/api/v1/auth/preferences",
+        json={"theme": "black"},
+        headers=user_headers,
+    )
+    assert updated.status_code == 200
+    assert updated.json()["theme"] == "black"
+    assert client.get("/api/v1/auth/me", headers=user_headers).json()["theme"] == "black"
+
+    invalid = client.patch(
+        "/api/v1/auth/preferences",
+        json={"theme": "neon"},
+        headers=user_headers,
+    )
+    assert invalid.status_code == 422
+    assert client.get("/api/v1/auth/me", headers=user_headers).json()["theme"] == "black"
+
+    audit_entries = client.get("/api/v1/audit-entries", headers=user_headers).json()
+    theme_entry = next(entry for entry in audit_entries if entry["action"] == "user.theme_changed")
+    assert theme_entry["details"] == {"previous_theme": "dark", "theme": "black"}
 
 
 def test_owner_manages_organization_team(client: TestClient, user_headers: dict[str, str]):

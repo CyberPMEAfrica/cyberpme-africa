@@ -53,6 +53,7 @@ from app.schemas import (
     SslCheckRead,
     UserCreate,
     UserRead,
+    UserPreferenceUpdate,
     UserUpdate,
 )
 from app.ssl_monitor import inspect_certificate, validate_public_hostname
@@ -275,6 +276,39 @@ def current_user(context: tuple[User, Organization] = Depends(require_user)) -> 
         organization_name=organization.name,
         email=user.email,
         role=user.role,
+        theme=user.theme,
+    )
+
+
+@app.patch("/api/v1/auth/preferences", response_model=CurrentUserRead)
+def update_user_preferences(
+    payload: UserPreferenceUpdate,
+    context: tuple[User, Organization] = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> CurrentUserRead:
+    user, organization = context
+    previous_theme = user.theme
+    user.theme = payload.theme
+    if previous_theme != payload.theme:
+        record_audit(
+            db,
+            organization,
+            user.email,
+            user.role,
+            "user.theme_changed",
+            "user",
+            user.id,
+            {"previous_theme": previous_theme, "theme": payload.theme},
+        )
+    db.commit()
+    db.refresh(user)
+    return CurrentUserRead(
+        id=user.id,
+        organization_id=organization.id,
+        organization_name=organization.name,
+        email=user.email,
+        role=user.role,
+        theme=user.theme,
     )
 
 

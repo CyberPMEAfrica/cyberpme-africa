@@ -183,6 +183,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(254), index=True)
     password_hash: Mapped[str] = mapped_column(String(256))
     role: Mapped[str] = mapped_column(String(20), default="viewer")
+    theme: Mapped[str] = mapped_column(String(20), default="dark", server_default="dark")
     is_active: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
