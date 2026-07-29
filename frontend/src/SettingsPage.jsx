@@ -20,6 +20,8 @@ const auditActionLabels = {
   "security_incident.status_changed": "Incident mis à jour",
   "ids_connector.created": "Connecteur IDS créé",
   "ids_connector.revoked": "Connecteur IDS révoqué",
+  "ids_connector.token_rotated": "Jeton IDS renouvelé",
+  "ids_connector.previous_token_revoked": "Ancien jeton IDS révoqué",
 };
 
 const themeOptions = [

@@ -165,12 +165,22 @@ class IdsConnectorRead(BaseModel):
     server_name: str = ""
     status: str
     last_event_at: datetime | None
+    previous_token_expires_at: datetime | None
+    token_rotated_at: datetime | None
     created_at: datetime
 
 
 class IdsConnectorCreated(IdsConnectorRead):
     ingest_token: str
     ingest_path: str
+
+
+class IdsConnectorTokenRotation(BaseModel):
+    grace_period_minutes: int = Field(default=60, ge=0, le=1440)
+
+
+class IdsConnectorTokenRotated(IdsConnectorCreated):
+    pass
 
 
 class LoginRequest(BaseModel):

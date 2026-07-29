@@ -29,6 +29,8 @@ from app.schemas import (
     IdsConnectorCreate,
     IdsConnectorCreated,
     IdsConnectorRead,
+    IdsConnectorTokenRotated,
+    IdsConnectorTokenRotation,
     InvitationAccept,
     InvitationCreate,
     InvitationCreated,
@@ -1170,6 +1172,105 @@ def delete_ids_connector(
 
 
 @app.post(
+    "/api/v1/ids-connectors/{connector_id}/rotate-token",
+    response_model=IdsConnectorTokenRotated,
+)
+def rotate_ids_connector_token(
+    connector_id: UUID,
+    payload: IdsConnectorTokenRotation,
+    context: tuple[User, Organization] = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> IdsConnectorTokenRotated:
+    user, organization = context
+    require_role(user, "owner", "admin")
+    connector = db.scalar(
+        select(IdsConnector).where(
+            IdsConnector.id == connector_id,
+            IdsConnector.organization_id == organization.id,
+        )
+    )
+    if connector is None:
+        raise HTTPException(status_code=404, detail="Connecteur introuvable.")
+
+    now = datetime.now(timezone.utc)
+    raw_token = secrets.token_urlsafe(48)
+    if payload.grace_period_minutes > 0:
+        connector.previous_token_hash = connector.token_hash
+        connector.previous_token_expires_at = now + timedelta(
+            minutes=payload.grace_period_minutes
+        )
+    else:
+        connector.previous_token_hash = None
+        connector.previous_token_expires_at = None
+    connector.token_hash = token_hash(raw_token)
+    connector.token_rotated_at = now
+    record_audit(
+        db,
+        organization,
+        user.email,
+        user.role,
+        "ids_connector.token_rotated",
+        "ids_connector",
+        connector.id,
+        {
+            "name": connector.name,
+            "connector_type": connector.connector_type,
+            "grace_period_minutes": payload.grace_period_minutes,
+            "previous_token_expires_at": (
+                connector.previous_token_expires_at.isoformat()
+                if connector.previous_token_expires_at
+                else None
+            ),
+        },
+    )
+    db.commit()
+    db.refresh(connector)
+    data = ids_connector_response(db, connector)
+    return IdsConnectorTokenRotated(
+        **data.model_dump(),
+        ingest_token=raw_token,
+        ingest_path=f"/api/v1/ids-connectors/{connector.id}/events",
+    )
+
+
+@app.delete(
+    "/api/v1/ids-connectors/{connector_id}/previous-token",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def revoke_previous_ids_connector_token(
+    connector_id: UUID,
+    context: tuple[User, Organization] = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    user, organization = context
+    require_role(user, "owner", "admin")
+    connector = db.scalar(
+        select(IdsConnector).where(
+            IdsConnector.id == connector_id,
+            IdsConnector.organization_id == organization.id,
+        )
+    )
+    if connector is None:
+        raise HTTPException(status_code=404, detail="Connecteur introuvable.")
+    if connector.previous_token_hash is None:
+        raise HTTPException(status_code=409, detail="Aucun ancien jeton n’est encore actif.")
+    connector.previous_token_hash = None
+    connector.previous_token_expires_at = None
+    record_audit(
+        db,
+        organization,
+        user.email,
+        user.role,
+        "ids_connector.previous_token_revoked",
+        "ids_connector",
+        connector.id,
+        {"name": connector.name, "connector_type": connector.connector_type},
+    )
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.post(
     "/api/v1/ids-connectors/{connector_id}/events",
     response_model=SecurityEventRead,
     status_code=status.HTTP_201_CREATED,
@@ -1186,7 +1287,18 @@ def ingest_ids_connector_event(
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Jeton du connecteur requis.")
     supplied_hash = token_hash(authorization.removeprefix("Bearer ").strip())
-    if not hmac.compare_digest(supplied_hash, connector.token_hash):
+    current_token_valid = hmac.compare_digest(supplied_hash, connector.token_hash)
+    now = datetime.now(timezone.utc)
+    previous_expires_at = connector.previous_token_expires_at
+    if previous_expires_at is not None and previous_expires_at.tzinfo is None:
+        previous_expires_at = previous_expires_at.replace(tzinfo=timezone.utc)
+    previous_token_valid = bool(
+        connector.previous_token_hash
+        and previous_expires_at
+        and previous_expires_at > now
+        and hmac.compare_digest(supplied_hash, connector.previous_token_hash)
+    )
+    if not current_token_valid and not previous_token_valid:
         raise HTTPException(status_code=401, detail="Jeton du connecteur invalide.")
     if payload.source != connector.connector_type and connector.connector_type != "other":
         raise HTTPException(status_code=422, detail="La source ne correspond pas au type du connecteur.")

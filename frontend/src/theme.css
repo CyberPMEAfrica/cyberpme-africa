@@ -152,6 +152,17 @@ article,
   border-color: var(--theme-border);
 }
 
+.token-rotation-form,
+.token-rotation-form select {
+  color: var(--theme-text);
+  background: var(--theme-inner);
+  border-color: var(--theme-border);
+}
+
+:root[data-theme="light"] .token-rotation-form label {
+  color: #294a57;
+}
+
 :root[data-theme="light"] body {
   background: radial-gradient(circle at 80% 0%, #d9eeeb 0, transparent 34%), var(--theme-bg);
 }

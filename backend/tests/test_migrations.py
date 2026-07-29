@@ -49,8 +49,13 @@ def test_migration_creates_a_fresh_schema_and_is_idempotent(tmp_path):
     with engine.connect() as connection:
         assert connection.exec_driver_sql(
             "SELECT version_num FROM alembic_version"
-        ).scalar_one() == "20260729_0002"
+        ).scalar_one() == "20260729_0003"
     assert {column["name"] for column in inspector.get_columns("users")} >= {"theme"}
+    assert {
+        "previous_token_hash",
+        "previous_token_expires_at",
+        "token_rotated_at",
+    }.issubset({column["name"] for column in inspector.get_columns("ids_connectors")})
     engine.dispose()
 
 
@@ -74,6 +79,18 @@ def test_migration_adopts_existing_schema_without_losing_data(tmp_path):
 
     with engine.begin() as connection:
         connection.exec_driver_sql("ALTER TABLE users DROP COLUMN theme")
+        connection.exec_driver_sql(
+            "ALTER TABLE ids_connectors DROP COLUMN token_rotated_at"
+        )
+        connection.exec_driver_sql(
+            "ALTER TABLE ids_connectors DROP COLUMN previous_token_expires_at"
+        )
+        connection.exec_driver_sql(
+            "DROP INDEX ix_ids_connectors_previous_token_hash"
+        )
+        connection.exec_driver_sql(
+            "ALTER TABLE ids_connectors DROP COLUMN previous_token_hash"
+        )
 
     upgrade_database(database_url)
 
@@ -91,5 +108,5 @@ def test_migration_adopts_existing_schema_without_losing_data(tmp_path):
     with engine.connect() as connection:
         assert connection.exec_driver_sql(
             "SELECT version_num FROM alembic_version"
-        ).scalar_one() == "20260729_0002"
+        ).scalar_one() == "20260729_0003"
     engine.dispose()

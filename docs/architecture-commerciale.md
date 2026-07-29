@@ -123,7 +123,7 @@ Le blocage automatique est désactivé par défaut. Toute action est journalisé
 
 ## Étapes avant production
 
-1. Adaptateurs automatiques Wazuh/Suricata et rotation des jetons de connecteur.
+1. Adaptateur Suricata et assistant d'installation multi-plateforme.
 2. Renforcement du journal append-only par une politique d'archivage externe.
 3. HTTPS, domaine, rotation des secrets et sauvegarde hors machine.
 4. Tests de charge, restauration, reprise après incident et sécurité.
