@@ -4,18 +4,19 @@ import hashlib
 import hmac
 import secrets
 import ssl
+from urllib.parse import quote
 from uuid import UUID
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
-from sqlalchemy import inspect, select, text
+from sqlalchemy import delete, inspect, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.config import settings
 from app.auth import hash_password, hash_session_token, issue_session_token, verify_password
 from app.database import Base, engine, get_db
-from app.email_notifications import send_alert_email
-from app.models import AgentCredential, Alert, BackupCheck, IdsConnector, Metric, NetworkScan, Organization, SecurityEvent, Server, SslCheck, User, UserSession
+from app.email_notifications import send_alert_email, send_invitation_email
+from app.models import AgentCredential, Alert, BackupCheck, IdsConnector, Metric, NetworkScan, Organization, SecurityEvent, Server, SslCheck, User, UserInvitation, UserSession
 from app.network_scanner import run_network_scan, validate_private_target
 from app.network_report import build_network_scan_pdf
 from app.schemas import (
@@ -27,6 +28,11 @@ from app.schemas import (
     IdsConnectorCreate,
     IdsConnectorCreated,
     IdsConnectorRead,
+    InvitationAccept,
+    InvitationCreate,
+    InvitationCreated,
+    InvitationPreview,
+    InvitationRead,
     MetricCreate,
     MetricRead,
     NetworkScanCreate,
@@ -36,11 +42,17 @@ from app.schemas import (
     SecurityIncidentUpdate,
     CurrentUserRead,
     LoginRequest,
+    OrganizationRead,
+    OrganizationUpdate,
+    PasswordChange,
     SessionRead,
     ServerCreate,
     ServerRead,
     SslCheckCreate,
     SslCheckRead,
+    UserCreate,
+    UserRead,
+    UserUpdate,
 )
 from app.ssl_monitor import inspect_certificate, validate_public_hostname
 
@@ -197,6 +209,36 @@ def require_role(user: User, *roles: str) -> None:
         raise HTTPException(status_code=403, detail="Droits insuffisants pour cette action.")
 
 
+def invitation_state(invitation: UserInvitation) -> str:
+    now = datetime.now(timezone.utc)
+    expires_at = invitation.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if invitation.accepted_at is not None:
+        return "accepted"
+    if invitation.revoked_at is not None:
+        return "revoked"
+    if expires_at <= now:
+        return "expired"
+    return "pending"
+
+
+def invitation_response(invitation: UserInvitation, email_sent: bool | None = None) -> InvitationRead | InvitationCreated:
+    values = {
+        "id": invitation.id,
+        "email": invitation.email,
+        "role": invitation.role,
+        "invited_by_email": invitation.invited_by_email,
+        "status": invitation_state(invitation),
+        "expires_at": invitation.expires_at,
+        "accepted_at": invitation.accepted_at,
+        "created_at": invitation.created_at,
+    }
+    if email_sent is not None:
+        return InvitationCreated(**values, email_sent=email_sent)
+    return InvitationRead(**values)
+
+
 SECURITY_RECOMMENDATIONS = {
     "authentication": "Vérifiez le compte ciblé, changez les identifiants compromis et activez l’authentification multifacteur.",
     "malware": "Isolez la machine concernée, lancez une analyse antivirus complète et conservez les éléments de preuve.",
@@ -260,6 +302,274 @@ def logout(
         db.delete(session)
         db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.post("/api/v1/auth/change-password", status_code=status.HTTP_204_NO_CONTENT)
+def change_password(
+    payload: PasswordChange,
+    context: tuple[User, Organization] = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    user, _ = context
+    if not verify_password(payload.current_password, user.password_hash):
+        raise HTTPException(status_code=400, detail="Le mot de passe actuel est incorrect.")
+    if payload.current_password == payload.new_password:
+        raise HTTPException(status_code=400, detail="Le nouveau mot de passe doit Ãªtre diffÃ©rent.")
+    user.password_hash = hash_password(payload.new_password)
+    db.execute(delete(UserSession).where(UserSession.user_id == user.id))
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.get("/api/v1/organization", response_model=OrganizationRead)
+def get_organization(
+    context: tuple[User, Organization] = Depends(require_user),
+) -> OrganizationRead:
+    _, organization = context
+    return OrganizationRead.model_validate(organization)
+
+
+@app.patch("/api/v1/organization", response_model=OrganizationRead)
+def update_organization(
+    payload: OrganizationUpdate,
+    context: tuple[User, Organization] = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> OrganizationRead:
+    user, organization = context
+    require_role(user, "owner")
+    normalized_name = payload.name.strip()
+    if len(normalized_name) < 2:
+        raise HTTPException(status_code=422, detail="Le nom de la PME doit contenir au moins 2 caractÃ¨res.")
+    organization.name = normalized_name
+    db.commit()
+    db.refresh(organization)
+    return OrganizationRead.model_validate(organization)
+
+
+@app.get("/api/v1/users", response_model=list[UserRead])
+def list_users(
+    context: tuple[User, Organization] = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> list[User]:
+    user, organization = context
+    require_role(user, "owner", "admin")
+    return list(
+        db.scalars(
+            select(User)
+            .where(User.organization_id == organization.id)
+            .order_by(User.created_at.asc())
+        )
+    )
+
+
+@app.post("/api/v1/users", response_model=UserRead, status_code=status.HTTP_201_CREATED)
+def create_user(
+    payload: UserCreate,
+    context: tuple[User, Organization] = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> User:
+    actor, organization = context
+    require_role(actor, "owner", "admin")
+    if actor.role == "admin" and payload.role == "admin":
+        raise HTTPException(status_code=403, detail="Seul le propriÃ©taire peut nommer un administrateur.")
+    user = User(
+        organization_id=organization.id,
+        email=payload.email.strip().lower(),
+        password_hash=hash_password(payload.password),
+        role=payload.role,
+    )
+    db.add(user)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Cette adresse e-mail existe dÃ©jÃ  dans la PME.") from exc
+    db.refresh(user)
+    return user
+
+
+@app.patch("/api/v1/users/{user_id}", response_model=UserRead)
+def update_user(
+    user_id: UUID,
+    payload: UserUpdate,
+    context: tuple[User, Organization] = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> User:
+    actor, organization = context
+    require_role(actor, "owner", "admin")
+    target = db.scalar(
+        select(User).where(User.id == user_id, User.organization_id == organization.id)
+    )
+    if target is None:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable.")
+    if target.id == actor.id or target.role == "owner":
+        raise HTTPException(status_code=400, detail="Le compte propriÃ©taire actif ne peut pas Ãªtre modifiÃ© ici.")
+    if actor.role == "admin" and (target.role == "admin" or payload.role == "admin"):
+        raise HTTPException(status_code=403, detail="Seul le propriÃ©taire peut gÃ©rer les administrateurs.")
+    if payload.role is not None:
+        target.role = payload.role
+    if payload.is_active is not None:
+        target.is_active = payload.is_active
+        if not target.is_active:
+            db.execute(delete(UserSession).where(UserSession.user_id == target.id))
+    db.commit()
+    db.refresh(target)
+    return target
+
+
+@app.get("/api/v1/invitations", response_model=list[InvitationRead])
+def list_invitations(
+    context: tuple[User, Organization] = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> list[InvitationRead]:
+    actor, organization = context
+    require_role(actor, "owner", "admin")
+    invitations = db.scalars(
+        select(UserInvitation)
+        .where(UserInvitation.organization_id == organization.id)
+        .order_by(UserInvitation.created_at.desc())
+        .limit(50)
+    )
+    return [invitation_response(invitation) for invitation in invitations]
+
+
+@app.post("/api/v1/invitations", response_model=InvitationCreated, status_code=status.HTTP_201_CREATED)
+def create_invitation(
+    payload: InvitationCreate,
+    context: tuple[User, Organization] = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> InvitationCreated:
+    actor, organization = context
+    require_role(actor, "owner", "admin")
+    if actor.role == "admin" and payload.role == "admin":
+        raise HTTPException(status_code=403, detail="Seul le propriÃ©taire peut inviter un administrateur.")
+    email = payload.email.strip().lower()
+    existing_user = db.scalar(
+        select(User).where(User.organization_id == organization.id, User.email == email)
+    )
+    if existing_user is not None and existing_user.is_active:
+        raise HTTPException(
+            status_code=409,
+            detail="Ce compte est dÃ©jÃ  actif. DÃ©sactivez-le d'abord pour lui envoyer une invitation de rÃ©activation.",
+        )
+
+    now = datetime.now(timezone.utc)
+    previous_invitations = db.scalars(
+        select(UserInvitation).where(
+            UserInvitation.organization_id == organization.id,
+            UserInvitation.email == email,
+            UserInvitation.accepted_at.is_(None),
+            UserInvitation.revoked_at.is_(None),
+        )
+    )
+    for previous in previous_invitations:
+        previous.revoked_at = now
+
+    raw_token = secrets.token_urlsafe(32)
+    invitation = UserInvitation(
+        organization_id=organization.id,
+        email=email,
+        role=payload.role,
+        token_hash=token_hash(raw_token),
+        invited_by_email=actor.email,
+        expires_at=now + timedelta(hours=24),
+    )
+    db.add(invitation)
+    db.commit()
+    db.refresh(invitation)
+
+    invitation_url = (
+        f"{settings.frontend_public_url.rstrip('/')}/#/invite?token={quote(raw_token, safe='')}"
+    )
+    email_sent = send_invitation_email(
+        recipient=email,
+        organization_name=organization.name,
+        role=payload.role,
+        invited_by=actor.email,
+        invitation_url=invitation_url,
+    )
+    return invitation_response(invitation, email_sent=email_sent)
+
+
+def get_valid_invitation(raw_token: str, db: Session) -> tuple[UserInvitation, Organization]:
+    invitation = db.scalar(
+        select(UserInvitation).where(UserInvitation.token_hash == token_hash(raw_token))
+    )
+    if invitation is None:
+        raise HTTPException(status_code=404, detail="Invitation introuvable.")
+    state = invitation_state(invitation)
+    if state != "pending":
+        messages = {
+            "accepted": "Cette invitation a dÃ©jÃ  Ã©tÃ© utilisÃ©e.",
+            "revoked": "Cette invitation a Ã©tÃ© remplacÃ©e ou rÃ©voquÃ©e.",
+            "expired": "Cette invitation a expirÃ©. Demandez-en une nouvelle.",
+        }
+        raise HTTPException(status_code=410, detail=messages[state])
+    organization = db.get(Organization, invitation.organization_id)
+    if organization is None:
+        raise HTTPException(status_code=404, detail="Organisation introuvable.")
+    return invitation, organization
+
+
+@app.get("/api/v1/invitations/preview", response_model=InvitationPreview)
+def preview_invitation(
+    token: str,
+    db: Session = Depends(get_db),
+) -> InvitationPreview:
+    invitation, organization = get_valid_invitation(token, db)
+    return InvitationPreview(
+        organization_name=organization.name,
+        organization_slug=organization.slug,
+        email=invitation.email,
+        role=invitation.role,
+        expires_at=invitation.expires_at,
+    )
+
+
+@app.post("/api/v1/invitations/accept", response_model=SessionRead)
+def accept_invitation(
+    payload: InvitationAccept,
+    db: Session = Depends(get_db),
+) -> SessionRead:
+    invitation, organization = get_valid_invitation(payload.token, db)
+    existing_user = db.scalar(
+        select(User).where(
+            User.organization_id == organization.id,
+            User.email == invitation.email,
+        )
+    )
+    if existing_user is not None and existing_user.is_active:
+        raise HTTPException(status_code=409, detail="Un compte actif existe dÃ©jÃ  pour cette adresse.")
+    if existing_user is None:
+        user = User(
+            organization_id=organization.id,
+            email=invitation.email,
+            password_hash=hash_password(payload.password),
+            role=invitation.role,
+        )
+        db.add(user)
+        db.flush()
+    else:
+        user = existing_user
+        user.password_hash = hash_password(payload.password)
+        user.role = invitation.role
+        user.is_active = True
+    invitation.accepted_at = datetime.now(timezone.utc)
+    raw_session, session_digest = issue_session_token()
+    session_expires_at = datetime.now(timezone.utc) + timedelta(hours=12)
+    db.add(
+        UserSession(
+            user_id=user.id,
+            token_hash=session_digest,
+            expires_at=session_expires_at,
+        )
+    )
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Un compte existe dÃ©jÃ  pour cette adresse.") from exc
+    return SessionRead(access_token=raw_session, expires_at=session_expires_at)
 
 
 @app.post("/api/v1/servers", response_model=ServerRead, status_code=status.HTTP_201_CREATED)

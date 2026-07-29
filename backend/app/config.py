@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     alert_email_from: str = "alerts@cyberpme.local"
     alert_email_to: str = "bocorodrigue43@mail.com"
+    frontend_public_url: str = "http://localhost:5173"
     agent_enrollment_key: str
     network_scan_key: str
     bootstrap_organization_name: str = "CyberPME Lab"

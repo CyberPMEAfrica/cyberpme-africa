@@ -1,5 +1,7 @@
+import hashlib
 import os
 from datetime import datetime, timedelta, timezone
+from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
 os.environ["DATABASE_URL"] = "sqlite:///./cyberpme_test.db"
@@ -16,7 +18,7 @@ from fastapi.testclient import TestClient
 from app.auth import hash_password
 from app.database import Base, SessionLocal, engine
 from app.main import app
-from app.models import Organization, User
+from app.models import Organization, User, UserInvitation
 
 
 @pytest.fixture(autouse=True)
@@ -70,6 +72,273 @@ def test_owner_login_session_and_logout(client: TestClient):
     assert profile.json()["role"] == "owner"
     assert client.post("/api/v1/auth/logout", headers=headers).status_code == 204
     assert client.get("/api/v1/auth/me", headers=headers).status_code == 401
+
+
+def test_owner_manages_organization_team(client: TestClient, user_headers: dict[str, str]):
+    organization = client.get("/api/v1/organization", headers=user_headers)
+    assert organization.status_code == 200
+    assert organization.json()["slug"] == "pme-test"
+
+    renamed = client.patch(
+        "/api/v1/organization",
+        json={"name": "PME Test BÃ©nin"},
+        headers=user_headers,
+    )
+    assert renamed.status_code == 200
+    assert renamed.json()["name"] == "PME Test BÃ©nin"
+
+    created = client.post(
+        "/api/v1/users",
+        json={
+            "email": "analyst@example.test",
+            "password": "Analyst-password-strong-2026",
+            "role": "analyst",
+        },
+        headers=user_headers,
+    )
+    assert created.status_code == 201
+    analyst = created.json()
+    assert analyst["email"] == "analyst@example.test"
+    assert analyst["is_active"] is True
+    assert len(client.get("/api/v1/users", headers=user_headers).json()) == 2
+
+    login = client.post(
+        "/api/v1/auth/login",
+        json={
+            "organization_slug": "pme-test",
+            "email": "analyst@example.test",
+            "password": "Analyst-password-strong-2026",
+        },
+    )
+    assert login.status_code == 200
+
+    disabled = client.patch(
+        f"/api/v1/users/{analyst['id']}",
+        json={"is_active": False, "role": "viewer"},
+        headers=user_headers,
+    )
+    assert disabled.status_code == 200
+    assert disabled.json()["role"] == "viewer"
+    assert disabled.json()["is_active"] is False
+    analyst_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    assert client.get("/api/v1/auth/me", headers=analyst_headers).status_code == 401
+
+
+def test_team_permissions_and_tenant_isolation(client: TestClient, user_headers: dict[str, str]):
+    admin = client.post(
+        "/api/v1/users",
+        json={
+            "email": "admin@example.test",
+            "password": "Admin-password-strong-2026",
+            "role": "admin",
+        },
+        headers=user_headers,
+    ).json()
+    admin_login = client.post(
+        "/api/v1/auth/login",
+        json={
+            "organization_slug": "pme-test",
+            "email": "admin@example.test",
+            "password": "Admin-password-strong-2026",
+        },
+    ).json()
+    admin_headers = {"Authorization": f"Bearer {admin_login['access_token']}"}
+
+    forbidden = client.post(
+        "/api/v1/users",
+        json={
+            "email": "second-admin@example.test",
+            "password": "Second-admin-password-2026",
+            "role": "admin",
+        },
+        headers=admin_headers,
+    )
+    assert forbidden.status_code == 403
+    assert client.patch(
+        f"/api/v1/users/{admin['id']}",
+        json={"is_active": False},
+        headers=admin_headers,
+    ).status_code == 400
+
+    with SessionLocal() as db:
+        other = Organization(name="Autre PME", slug="autre-equipe")
+        db.add(other)
+        db.flush()
+        outsider = User(
+            organization_id=other.id,
+            email="viewer@autre.test",
+            password_hash=hash_password("Outsider-password-strong-2026"),
+            role="viewer",
+        )
+        db.add(outsider)
+        db.commit()
+        outsider_id = outsider.id
+    assert client.patch(
+        f"/api/v1/users/{outsider_id}",
+        json={"is_active": False},
+        headers=user_headers,
+    ).status_code == 404
+
+
+def test_user_changes_password_and_sessions_are_revoked(client: TestClient, user_headers: dict[str, str]):
+    changed = client.post(
+        "/api/v1/auth/change-password",
+        json={
+            "current_password": "Test-password-very-strong-2026",
+            "new_password": "New-owner-password-strong-2026",
+        },
+        headers=user_headers,
+    )
+    assert changed.status_code == 204
+    assert client.get("/api/v1/auth/me", headers=user_headers).status_code == 401
+    old_login = client.post(
+        "/api/v1/auth/login",
+        json={
+            "organization_slug": "pme-test",
+            "email": "owner@example.test",
+            "password": "Test-password-very-strong-2026",
+        },
+    )
+    assert old_login.status_code == 401
+    new_login = client.post(
+        "/api/v1/auth/login",
+        json={
+            "organization_slug": "pme-test",
+            "email": "owner@example.test",
+            "password": "New-owner-password-strong-2026",
+        },
+    )
+    assert new_login.status_code == 200
+
+
+def test_secure_invitation_creates_account_only_after_acceptance(
+    client: TestClient,
+    user_headers: dict[str, str],
+    monkeypatch,
+):
+    sent = {}
+
+    def fake_send_invitation_email(**kwargs):
+        sent.update(kwargs)
+        return True
+
+    monkeypatch.setattr("app.main.send_invitation_email", fake_send_invitation_email)
+    created = client.post(
+        "/api/v1/invitations",
+        json={"email": "invitee@example.test", "role": "analyst"},
+        headers=user_headers,
+    )
+    assert created.status_code == 201
+    assert created.json()["email_sent"] is True
+    assert created.json()["status"] == "pending"
+    assert sent["recipient"] == "invitee@example.test"
+    raw_token = parse_qs(urlparse(sent["invitation_url"]).fragment.split("?", 1)[1])["token"][0]
+
+    assert len(client.get("/api/v1/users", headers=user_headers).json()) == 1
+    listed = client.get("/api/v1/invitations", headers=user_headers)
+    assert listed.status_code == 200
+    assert raw_token not in listed.text
+
+    preview = client.get("/api/v1/invitations/preview", params={"token": raw_token})
+    assert preview.status_code == 200
+    assert preview.json()["organization_slug"] == "pme-test"
+    assert preview.json()["role"] == "analyst"
+
+    accepted = client.post(
+        "/api/v1/invitations/accept",
+        json={"token": raw_token, "password": "Invitee-password-strong-2026"},
+    )
+    assert accepted.status_code == 200
+    invitee_headers = {"Authorization": f"Bearer {accepted.json()['access_token']}"}
+    profile = client.get("/api/v1/auth/me", headers=invitee_headers)
+    assert profile.status_code == 200
+    assert profile.json()["email"] == "invitee@example.test"
+    assert profile.json()["role"] == "analyst"
+    assert client.post(
+        "/api/v1/invitations/accept",
+        json={"token": raw_token, "password": "Another-password-strong-2026"},
+    ).status_code == 410
+
+
+def test_reinvitation_revokes_previous_link_and_expired_link_is_rejected(
+    client: TestClient,
+    user_headers: dict[str, str],
+    monkeypatch,
+):
+    links = []
+
+    def capture_invitation(**kwargs):
+        links.append(kwargs["invitation_url"])
+        return True
+
+    monkeypatch.setattr("app.main.send_invitation_email", capture_invitation)
+    payload = {"email": "pending@example.test", "role": "viewer"}
+    assert client.post("/api/v1/invitations", json=payload, headers=user_headers).status_code == 201
+    assert client.post("/api/v1/invitations", json=payload, headers=user_headers).status_code == 201
+    first_token = parse_qs(urlparse(links[0]).fragment.split("?", 1)[1])["token"][0]
+    second_token = parse_qs(urlparse(links[1]).fragment.split("?", 1)[1])["token"][0]
+    assert client.get("/api/v1/invitations/preview", params={"token": first_token}).status_code == 410
+
+    with SessionLocal() as db:
+        invitation = db.query(UserInvitation).filter_by(
+            token_hash=hashlib.sha256(second_token.encode()).hexdigest()
+        ).one()
+        invitation.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+        db.commit()
+    expired = client.get("/api/v1/invitations/preview", params={"token": second_token})
+    assert expired.status_code == 410
+    assert "expir" in expired.json()["detail"].lower()
+
+
+def test_disabled_existing_account_can_be_reinvited(
+    client: TestClient,
+    user_headers: dict[str, str],
+    monkeypatch,
+):
+    created_user = client.post(
+        "/api/v1/users",
+        json={
+            "email": "legacy-user@example.test",
+            "password": "Legacy-password-strong-2026",
+            "role": "viewer",
+        },
+        headers=user_headers,
+    ).json()
+    active_invitation = client.post(
+        "/api/v1/invitations",
+        json={"email": "legacy-user@example.test", "role": "analyst"},
+        headers=user_headers,
+    )
+    assert active_invitation.status_code == 409
+
+    client.patch(
+        f"/api/v1/users/{created_user['id']}",
+        json={"is_active": False},
+        headers=user_headers,
+    )
+    sent = {}
+    monkeypatch.setattr(
+        "app.main.send_invitation_email",
+        lambda **kwargs: sent.update(kwargs) is None,
+    )
+    reinvited = client.post(
+        "/api/v1/invitations",
+        json={"email": "legacy-user@example.test", "role": "analyst"},
+        headers=user_headers,
+    )
+    assert reinvited.status_code == 201
+    token = parse_qs(urlparse(sent["invitation_url"]).fragment.split("?", 1)[1])["token"][0]
+    accepted = client.post(
+        "/api/v1/invitations/accept",
+        json={"token": token, "password": "Replacement-password-2026"},
+    )
+    assert accepted.status_code == 200
+    profile = client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {accepted.json()['access_token']}"},
+    )
+    assert profile.json()["role"] == "analyst"
+    assert profile.json()["email"] == "legacy-user@example.test"
 
 
 def test_organizations_cannot_read_each_others_servers(client: TestClient, user_headers: dict[str, str]):

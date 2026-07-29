@@ -7,6 +7,7 @@ import "./shell.css";
 import AppShell, { activePages } from "./AppShell";
 import NetworkScanner from "./NetworkScanner";
 import BackupsPage from "./BackupsPage";
+import InvitationPage from "./InvitationPage";
 import LoginPage from "./LoginPage";
 import ReportsPage from "./ReportsPage";
 import SecurityEventsPage from "./SecurityEventsPage";
@@ -69,6 +70,12 @@ function AlertsPage({ alerts }) {
 function pageFromHash() {
   const requested = window.location.hash.replace("#/", "");
   return activePages.includes(requested) ? requested : "overview";
+}
+
+function invitationTokenFromHash() {
+  const hash = window.location.hash;
+  if (!hash.startsWith("#/invite?")) return "";
+  return new URLSearchParams(hash.split("?")[1] || "").get("token") || "";
 }
 
 function App() {
@@ -146,6 +153,19 @@ function App() {
     setCurrentUser(null);
   }
 
+  function passwordChanged() {
+    localStorage.removeItem("cyberpme_session");
+    setSessionToken("");
+    setCurrentUser(null);
+  }
+
+  const invitationToken = invitationTokenFromHash();
+  if (invitationToken) {
+    return <InvitationPage apiUrl={API_URL} token={invitationToken} onAuthenticated={(session) => {
+      authenticated(session);
+      window.location.hash = "/overview";
+    }}/>;
+  }
   if (!sessionToken || !currentUser) return <LoginPage apiUrl={API_URL} onAuthenticated={authenticated}/>;
 
   let page;
@@ -156,7 +176,7 @@ function App() {
   else if (activePage === "reports") page = <ReportsPage apiUrl={API_URL} token={sessionToken} scans={networkScans}/>;
   else if (activePage === "backups") page = <BackupsPage checks={backupChecks}/>;
   else if (activePage === "ids") page = <SecurityEventsPage apiUrl={API_URL} token={sessionToken} events={securityEvents} connectors={idsConnectors} servers={servers} currentUser={currentUser} onCreated={loadData}/>;
-  else if (activePage === "settings") page = <SettingsPage apiUrl={API_URL}/>;
+  else if (activePage === "settings") page = <SettingsPage apiUrl={API_URL} token={sessionToken} currentUser={currentUser} onPasswordChanged={passwordChanged}/>;
   else page = <OverviewPage servers={servers} alerts={alerts} error={error}/>;
 
   return <AppShell activePage={activePage} onNavigate={navigate} apiOnline={!error} isRefreshing={isRefreshing} lastUpdated={lastUpdated} onRefresh={() => loadData()} currentUser={currentUser} onLogout={logout}>
