@@ -9,12 +9,12 @@ from uuid import UUID
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
-from sqlalchemy import delete, inspect, select, text
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.config import settings
 from app.auth import hash_password, hash_session_token, issue_session_token, verify_password
-from app.database import Base, engine, get_db
+from app.database import get_db
 from app.email_notifications import send_alert_email, send_invitation_email
 from app.models import AgentCredential, Alert, AuditEntry, BackupCheck, IdsConnector, Metric, NetworkScan, Organization, SecurityEvent, Server, SslCheck, User, UserInvitation, UserSession
 from app.network_scanner import run_network_scan, validate_private_target
@@ -60,12 +60,6 @@ from app.ssl_monitor import inspect_certificate, validate_public_hostname
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    Base.metadata.create_all(bind=engine)
-    with engine.begin() as connection:
-        columns = {column["name"] for column in inspect(connection).get_columns("organizations")}
-        for name in ("enrollment_key_hash", "scan_key_hash"):
-            if name not in columns:
-                connection.execute(text(f"ALTER TABLE organizations ADD COLUMN {name} VARCHAR(64)"))
     with next(get_db()) as db:
         organization = db.scalar(select(Organization).where(Organization.slug == settings.bootstrap_organization_slug))
         if organization is None:
@@ -78,44 +72,6 @@ async def lifespan(_: FastAPI):
         organization.enrollment_key_hash = token_hash(settings.agent_enrollment_key)
         organization.scan_key_hash = token_hash(settings.network_scan_key)
         db.commit()
-        organization_id = organization.id
-    with engine.begin() as connection:
-        inspector = inspect(connection)
-        for table_name in ("servers", "network_scans", "ssl_checks"):
-            columns = {column["name"] for column in inspector.get_columns(table_name)}
-            if "organization_id" not in columns:
-                column_type = "UUID" if connection.dialect.name == "postgresql" else "CHAR(32)"
-                connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN organization_id {column_type}"))
-            if connection.dialect.name == "postgresql":
-                update_statement = text(
-                    f"UPDATE {table_name} SET organization_id = CAST(:organization_id AS UUID) WHERE organization_id IS NULL"
-                )
-                migration_id = str(organization_id)
-            else:
-                update_statement = text(
-                    f"UPDATE {table_name} SET organization_id = :organization_id WHERE organization_id IS NULL"
-                )
-                migration_id = organization_id.hex
-            connection.execute(update_statement, {"organization_id": migration_id})
-            connection.execute(
-                text(f"CREATE INDEX IF NOT EXISTS ix_{table_name}_organization_id ON {table_name} (organization_id)")
-            )
-        if connection.dialect.name == "postgresql":
-            connection.execute(text("ALTER TABLE servers DROP CONSTRAINT IF EXISTS servers_hostname_key"))
-        connection.execute(
-            text("CREATE UNIQUE INDEX IF NOT EXISTS uq_server_organization_hostname ON servers (organization_id, hostname)")
-        )
-        security_columns = {column["name"] for column in inspect(connection).get_columns("security_events")}
-        security_column_types = {
-            "handled_by_email": "VARCHAR(254)",
-            "acknowledged_at": "TIMESTAMP WITH TIME ZONE" if connection.dialect.name == "postgresql" else "DATETIME",
-            "resolved_at": "TIMESTAMP WITH TIME ZONE" if connection.dialect.name == "postgresql" else "DATETIME",
-            "resolution_note": "TEXT",
-        }
-        for column_name, column_type in security_column_types.items():
-            if column_name not in security_columns:
-                connection.execute(text(f"ALTER TABLE security_events ADD COLUMN {column_name} {column_type}"))
-        connection.execute(text("UPDATE security_events SET status = 'new' WHERE status = 'active'"))
     if settings.bootstrap_admin_email and settings.bootstrap_admin_password:
         with next(get_db()) as db:
             organization = db.scalar(select(Organization).where(Organization.slug == settings.bootstrap_organization_slug))

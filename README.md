@@ -76,3 +76,22 @@ rôles et comptes, traitement des incidents et connecteurs IDS. Seuls le
 propriétaire et les administrateurs peuvent consulter cet historique depuis
 **Paramètres**. Aucun mot de passe, jeton de session ou secret de connecteur
 n'est enregistré dans les détails du journal.
+
+## Migrations de base de données
+
+Le backend utilise Alembic pour versionner le schéma PostgreSQL. Le conteneur
+applique automatiquement les migrations avant de démarrer l'API :
+
+```powershell
+docker compose up -d --build
+```
+
+Pour vérifier la version appliquée :
+
+```powershell
+docker compose exec backend alembic -c /app/alembic.ini current
+```
+
+La première migration sait créer une installation neuve ou adopter sans perte
+une base CyberPME existante. Une sauvegarde PostgreSQL reste obligatoire avant
+toute mise à niveau en production.
