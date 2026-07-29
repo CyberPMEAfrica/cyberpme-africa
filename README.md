@@ -58,4 +58,12 @@ Chaque agent doit fournir `CYBERPME_ENROLLMENT_KEY` lors de son enregistrement. 
 
 ## Envoi e-mail réel
 
-La configuration SMTP se fait uniquement dans le fichier `.env`. Le mode par défaut utilise Mailpit et ne livre aucun message sur Internet. Pour un fournisseur réel, renseignez `SMTP_HOST`, `SMTP_PORT`, `SMTP_USE_TLS`, `SMTP_USERNAME`, `SMTP_PASSWORD` et `ALERT_EMAIL_FROM`, puis recréez le conteneur backend.
+La configuration SMTP se fait uniquement dans le fichier `.env`. Le mode par défaut utilise Mailpit et ne livre aucun message sur Internet. Pour un fournisseur réel, renseignez `SMTP_HOST`, `SMTP_PORT`, `SMTP_USE_TLS`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `ALERT_EMAIL_FROM` et l'adresse publique `FRONTEND_PUBLIC_URL`, puis recréez le conteneur backend.
+
+Les collaborateurs sont ajoutés par invitation sécurisée :
+
+- le lien personnel est envoyé par e-mail et expire après 24 heures ;
+- seul le hachage du jeton est conservé dans PostgreSQL ;
+- le destinataire choisit son propre mot de passe ;
+- une nouvelle invitation révoque automatiquement le lien précédent ;
+- un lien accepté, expiré ou révoqué ne peut pas être réutilisé.

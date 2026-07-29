@@ -191,3 +191,81 @@ class CurrentUserRead(BaseModel):
     organization_name: str
     email: str
     role: str
+
+
+class OrganizationRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    name: str
+    slug: str
+    created_at: datetime
+
+
+class OrganizationUpdate(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+
+
+class UserCreate(BaseModel):
+    email: str = Field(
+        min_length=5,
+        max_length=254,
+        pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$",
+    )
+    password: str = Field(min_length=12, max_length=256)
+    role: str = Field(pattern="^(admin|analyst|viewer)$")
+
+
+class UserRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    email: str
+    role: str
+    is_active: bool
+    created_at: datetime
+
+
+class UserUpdate(BaseModel):
+    role: str | None = Field(default=None, pattern="^(admin|analyst|viewer)$")
+    is_active: bool | None = None
+
+
+class PasswordChange(BaseModel):
+    current_password: str = Field(min_length=12, max_length=256)
+    new_password: str = Field(min_length=12, max_length=256)
+
+
+class InvitationCreate(BaseModel):
+    email: str = Field(
+        min_length=5,
+        max_length=254,
+        pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$",
+    )
+    role: str = Field(pattern="^(admin|analyst|viewer)$")
+
+
+class InvitationRead(BaseModel):
+    id: UUID
+    email: str
+    role: str
+    invited_by_email: str
+    status: str
+    expires_at: datetime
+    accepted_at: datetime | None
+    created_at: datetime
+
+
+class InvitationCreated(InvitationRead):
+    email_sent: bool
+
+
+class InvitationPreview(BaseModel):
+    organization_name: str
+    organization_slug: str
+    email: str
+    role: str
+    expires_at: datetime
+
+
+class InvitationAccept(BaseModel):
+    token: str = Field(min_length=32, max_length=256)
+    password: str = Field(min_length=12, max_length=256)

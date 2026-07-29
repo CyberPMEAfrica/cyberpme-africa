@@ -25,6 +25,15 @@ organisation. Cette règle est appliquée dans l'API et testée automatiquement.
 - Les utilisateurs se connectent avec un mot de passe haché et reçoivent une
   session courte.
 - Les rôles minimaux sont `owner`, `admin`, `analyst` et `viewer`.
+- Le propriétaire gère le nom de la PME, les administrateurs et tous les
+  comptes depuis le tableau de bord.
+- Un administrateur peut créer et gérer les analystes et les comptes en lecture
+  seule, sans pouvoir modifier le propriétaire ni un autre administrateur.
+- La désactivation d'un compte et le changement d'un mot de passe révoquent
+  immédiatement les sessions concernées.
+- Un nouveau collaborateur reçoit une invitation à usage unique valable 24
+  heures et choisit lui-même son mot de passe. Une réinvitation révoque le lien
+  précédent et aucun jeton brut n'est stocké dans la base.
 - Chaque organisation possède ses propres clés d'enrôlement d'agents.
 - Chaque agent possède ensuite un jeton individuel révocable.
 - Les secrets de connecteurs sont chiffrés et ne sont jamais envoyés au
