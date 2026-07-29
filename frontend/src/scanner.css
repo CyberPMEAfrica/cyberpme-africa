@@ -80,6 +80,18 @@
 .connector-list h3,.connector-list p { margin:0; }
 .connector-list p,.connector-list small { color:#7895a5; font-size:12px; }
 .connector-list small { display:block; margin-top:5px; }
+.connector-identity { min-width:0; }
+.connector-actions { display:flex; align-items:center; justify-content:flex-end; gap:7px; flex-wrap:wrap; }
+.connector-actions button { min-width:0; padding:8px 10px; }
+.rotation-active { color:#ffc857!important; }
+.transition-button { color:#ffc857; background:#463a19; }
+.token-rotation-form { grid-column:1/-1; display:grid; grid-template-columns:minmax(220px,1fr) minmax(180px,.5fr) auto; align-items:end; gap:14px; padding:15px; border:1px solid #315366; border-radius:9px; background:#0b2231; }
+.token-rotation-form>div:first-child { display:grid; gap:5px; }
+.token-rotation-form>div:first-child small { margin:0; line-height:1.45; }
+.token-rotation-form label { display:grid; gap:6px; color:#b8ccd6; font-size:12px; font-weight:600; }
+.token-rotation-form select { width:100%; padding:9px 10px; border:1px solid #2b4c5d; border-radius:8px; color:#e9f2f7; background:#071a28; }
+.token-rotation-form>div:last-child { display:flex; gap:7px; }
+.token-rotation-form button { min-width:0; padding:9px 11px; }
 .danger-button { min-width:0; padding:8px 10px; color:#ff9ba1; background:#46232c; }
 .event-heading { margin:10px 0 16px; }
 @media(max-width:800px){.connector-layout{grid-template-columns:1fr}.connector-list article{grid-template-columns:1fr auto}.connector-list .danger-button{grid-column:1/-1}}
@@ -103,3 +115,4 @@
 .resolution-form textarea { min-height:90px; resize:vertical; padding:11px; border:1px solid #2b4c5d; border-radius:8px; color:#e9f2f7; background:#0b2231; }
 .resolution-form button { justify-self:start; }
 @media(max-width:700px){.event-heading{align-items:start;flex-direction:column}.incident-filter{width:100%;justify-content:space-between}.incident-badges{align-items:flex-end;flex-direction:column}}
+@media(max-width:900px){.token-rotation-form{grid-template-columns:1fr}.token-rotation-form>div:last-child{flex-wrap:wrap}}

@@ -10,6 +10,8 @@ export default function SecurityEventsPage({ apiUrl, token, events, connectors, 
   const [connectorType, setConnectorType] = useState("wazuh");
   const [serverId, setServerId] = useState(servers[0]?.id || "");
   const [created, setCreated] = useState(null);
+  const [rotatingId, setRotatingId] = useState("");
+  const [gracePeriodMinutes, setGracePeriodMinutes] = useState(60);
   const [message, setMessage] = useState("");
   const [incidentFilter, setIncidentFilter] = useState("open");
   const [resolvingId, setResolvingId] = useState("");
@@ -53,6 +55,39 @@ export default function SecurityEventsPage({ apiUrl, token, events, connectors, 
     }
   }
 
+  async function rotateToken(connectorId) {
+    setMessage("");
+    const response = await fetch(`${apiUrl}/api/v1/ids-connectors/${connectorId}/rotate-token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ grace_period_minutes: Number(gracePeriodMinutes) }),
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      setMessage(error.detail || "Impossible de renouveler le jeton.");
+      return;
+    }
+    setCreated(await response.json());
+    setRotatingId("");
+    setMessage("Jeton renouvelé. Copiez le nouveau secret avant de reconfigurer le collecteur.");
+    onCreated();
+  }
+
+  async function revokePreviousToken(connectorId) {
+    if (!window.confirm("Terminer la transition et révoquer immédiatement l’ancien jeton ?")) return;
+    const response = await fetch(`${apiUrl}/api/v1/ids-connectors/${connectorId}/previous-token`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      setMessage(error.detail || "Impossible de révoquer l’ancien jeton.");
+      return;
+    }
+    setMessage("Transition terminée : seul le nouveau jeton est désormais accepté.");
+    onCreated();
+  }
+
   async function updateIncident(eventId, status, note = null) {
     const response = await fetch(`${apiUrl}/api/v1/security-events/${eventId}`, {
       method: "PATCH",
@@ -94,16 +129,49 @@ export default function SecurityEventsPage({ apiUrl, token, events, connectors, 
       </form>
       <div className="scan-results">
         {created && <div className="connector-secret">
-          <strong>Jeton à conserver maintenant</strong>
+          <strong>{created.token_rotated_at ? "Nouveau jeton à conserver maintenant" : "Jeton à conserver maintenant"}</strong>
           <code>{created.ingest_token}</code>
           <small>URL : {apiUrl}{created.ingest_path}</small>
+          {created.previous_token_expires_at && <small>Ancien jeton accepté jusqu’au {new Date(created.previous_token_expires_at).toLocaleString("fr-FR")}.</small>}
         </div>}
         <div className="connector-list">
-          {connectors.length ? connectors.map(connector => <article key={connector.id}>
-            <div><h3>{connector.name}</h3><p>{connector.connector_type.toUpperCase()} · {connector.server_name}</p><small>{connector.last_event_at ? `Dernier événement : ${new Date(connector.last_event_at).toLocaleString("fr-FR")}` : "En attente du premier événement"}</small></div>
-            <span className="scan-status completed">Actif</span>
-            {canManage && <button className="danger-button" onClick={() => remove(connector.id)}>Révoquer</button>}
-          </article>) : <div className="empty-state"><h3>Aucun connecteur configuré</h3><p>Créez un connecteur Wazuh, Suricata ou générique pour cette organisation.</p></div>}
+          {connectors.length ? connectors.map(connector => {
+            const transitionActive = connector.previous_token_expires_at
+              && new Date(connector.previous_token_expires_at).getTime() > Date.now();
+            return <article className="connector-card" key={connector.id}>
+              <div className="connector-identity">
+                <h3>{connector.name}</h3>
+                <p>{connector.connector_type.toUpperCase()} · {connector.server_name}</p>
+                <small>{connector.last_event_at ? `Dernier événement : ${new Date(connector.last_event_at).toLocaleString("fr-FR")}` : "En attente du premier événement"}</small>
+                {connector.token_rotated_at && <small>Dernier renouvellement : {new Date(connector.token_rotated_at).toLocaleString("fr-FR")}</small>}
+                {transitionActive && <small className="rotation-active">Transition active jusqu’au {new Date(connector.previous_token_expires_at).toLocaleString("fr-FR")}</small>}
+              </div>
+              <span className="scan-status completed">Actif</span>
+              {canManage && <div className="connector-actions">
+                <button className="secondary-button" onClick={() => setRotatingId(rotatingId === connector.id ? "" : connector.id)}>Renouveler</button>
+                {transitionActive && <button className="transition-button" onClick={() => revokePreviousToken(connector.id)}>Terminer la transition</button>}
+                <button className="danger-button" onClick={() => remove(connector.id)}>Révoquer</button>
+              </div>}
+              {rotatingId === connector.id && <div className="token-rotation-form">
+                <div>
+                  <strong>Renouveler le jeton</strong>
+                  <small>L’ancien jeton restera temporairement accepté pour éviter une coupure de collecte.</small>
+                </div>
+                <label>Période de transition
+                  <select value={gracePeriodMinutes} onChange={event => setGracePeriodMinutes(Number(event.target.value))}>
+                    <option value={0}>Aucune — révocation immédiate</option>
+                    <option value={15}>15 minutes</option>
+                    <option value={60}>1 heure</option>
+                    <option value={1440}>24 heures</option>
+                  </select>
+                </label>
+                <div>
+                  <button onClick={() => rotateToken(connector.id)}>Générer le nouveau jeton</button>
+                  <button className="secondary-button" onClick={() => setRotatingId("")}>Annuler</button>
+                </div>
+              </div>}
+            </article>;
+          }) : <div className="empty-state"><h3>Aucun connecteur configuré</h3><p>Créez un connecteur Wazuh, Suricata ou générique pour cette organisation.</p></div>}
         </div>
       </div>
     </div>

@@ -2,7 +2,7 @@ import hashlib
 import os
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlparse
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 os.environ["DATABASE_URL"] = "sqlite:///./cyberpme_test.db"
 os.environ["AGENT_ENROLLMENT_KEY"] = "ci-enrollment-secret"
@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 from app.auth import hash_password
 from app.database import Base, SessionLocal, engine
 from app.main import app
-from app.models import Organization, User, UserInvitation
+from app.models import IdsConnector, Organization, User, UserInvitation
 
 
 @pytest.fixture(autouse=True)
@@ -732,6 +732,109 @@ def test_ids_connector_is_tenant_scoped_and_uses_a_dedicated_token(client: TestC
     assert ingested.json()["id"] == duplicate.json()["id"]
     listed = client.get("/api/v1/ids-connectors", headers=user_headers).json()
     assert listed[0]["last_event_at"] is not None
+    assert listed[0]["token_rotated_at"] is None
+
+    original_token = connector["ingest_token"]
+    rotated = client.post(
+        f"/api/v1/ids-connectors/{connector['id']}/rotate-token",
+        json={"grace_period_minutes": 15},
+        headers=user_headers,
+    )
+    assert rotated.status_code == 200
+    rotated_connector = rotated.json()
+    assert rotated_connector["ingest_token"] != original_token
+    assert rotated_connector["previous_token_expires_at"] is not None
+    assert rotated_connector["token_rotated_at"] is not None
+    assert "ingest_token" not in client.get(
+        "/api/v1/ids-connectors",
+        headers=user_headers,
+    ).text
+
+    old_token_event = event | {"event_key": "wazuh-old-token-transition"}
+    new_token_event = event | {"event_key": "wazuh-new-token"}
+    assert client.post(
+        endpoint,
+        json=old_token_event,
+        headers={"Authorization": f"Bearer {original_token}"},
+    ).status_code == 201
+    assert client.post(
+        endpoint,
+        json=new_token_event,
+        headers={"Authorization": f"Bearer {rotated_connector['ingest_token']}"},
+    ).status_code == 201
+
+    revoked_previous = client.delete(
+        f"/api/v1/ids-connectors/{connector['id']}/previous-token",
+        headers=user_headers,
+    )
+    assert revoked_previous.status_code == 204
+    assert client.post(
+        endpoint,
+        json=event | {"event_key": "wazuh-revoked-old-token"},
+        headers={"Authorization": f"Bearer {original_token}"},
+    ).status_code == 401
+
+    rotated_again = client.post(
+        f"/api/v1/ids-connectors/{connector['id']}/rotate-token",
+        json={"grace_period_minutes": 60},
+        headers=user_headers,
+    ).json()
+    with SessionLocal() as db:
+        stored_connector = db.get(IdsConnector, UUID(connector["id"]))
+        stored_connector.previous_token_expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+        db.commit()
+    assert client.post(
+        endpoint,
+        json=event | {"event_key": "wazuh-expired-old-token"},
+        headers={"Authorization": f"Bearer {rotated_connector['ingest_token']}"},
+    ).status_code == 401
+    assert client.post(
+        endpoint,
+        json=event | {"event_key": "wazuh-current-token-after-expiry"},
+        headers={"Authorization": f"Bearer {rotated_again['ingest_token']}"},
+    ).status_code == 201
+    assert client.post(
+        f"/api/v1/ids-connectors/{connector['id']}/rotate-token",
+        json={"grace_period_minutes": 1441},
+        headers=user_headers,
+    ).status_code == 422
+
+    audit_actions = {
+        entry["action"]
+        for entry in client.get("/api/v1/audit-entries", headers=user_headers).json()
+    }
+    assert {
+        "ids_connector.token_rotated",
+        "ids_connector.previous_token_revoked",
+    }.issubset(audit_actions)
+
+    client.post(
+        "/api/v1/users",
+        json={
+            "email": "ids-viewer@example.test",
+            "password": "IDS-viewer-password-strong-2026",
+            "role": "viewer",
+        },
+        headers=user_headers,
+    )
+    viewer_login = client.post(
+        "/api/v1/auth/login",
+        json={
+            "organization_slug": "pme-test",
+            "email": "ids-viewer@example.test",
+            "password": "IDS-viewer-password-strong-2026",
+        },
+    ).json()
+    viewer_headers = {"Authorization": f"Bearer {viewer_login['access_token']}"}
+    assert client.post(
+        f"/api/v1/ids-connectors/{connector['id']}/rotate-token",
+        json={"grace_period_minutes": 60},
+        headers=viewer_headers,
+    ).status_code == 403
+    assert client.delete(
+        f"/api/v1/ids-connectors/{connector['id']}/previous-token",
+        headers=viewer_headers,
+    ).status_code == 403
 
     with SessionLocal() as db:
         other = Organization(name="PME isolée", slug="pme-isolee")
@@ -751,3 +854,8 @@ def test_ids_connector_is_tenant_scoped_and_uses_a_dedicated_token(client: TestC
     }).json()
     other_headers = {"Authorization": f"Bearer {other_login['access_token']}"}
     assert client.get("/api/v1/ids-connectors", headers=other_headers).json() == []
+    assert client.post(
+        f"/api/v1/ids-connectors/{connector['id']}/rotate-token",
+        json={"grace_period_minutes": 60},
+        headers=other_headers,
+    ).status_code == 404
