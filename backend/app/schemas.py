@@ -191,6 +191,11 @@ class CurrentUserRead(BaseModel):
     organization_name: str
     email: str
     role: str
+    theme: str
+
+
+class UserPreferenceUpdate(BaseModel):
+    theme: str = Field(pattern="^(light|dark|black)$")
 
 
 class OrganizationRead(BaseModel):

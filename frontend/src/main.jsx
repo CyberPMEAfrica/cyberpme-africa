@@ -4,6 +4,7 @@ import "./styles.css";
 import "./alerts.css";
 import "./scanner.css";
 import "./shell.css";
+import "./theme.css";
 import AppShell, { activePages } from "./AppShell";
 import NetworkScanner from "./NetworkScanner";
 import BackupsPage from "./BackupsPage";
@@ -81,6 +82,7 @@ function invitationTokenFromHash() {
 function App() {
   const [sessionToken, setSessionToken] = useState(() => localStorage.getItem("cyberpme_session") || "");
   const [currentUser, setCurrentUser] = useState(null);
+  const [theme, setTheme] = useState(() => localStorage.getItem("cyberpme_theme") || "dark");
   const [activePage, setActivePage] = useState(pageFromHash);
   const [servers, setServers] = useState([]);
   const [alerts, setAlerts] = useState([]);
@@ -92,6 +94,12 @@ function App() {
   const [error, setError] = useState("");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState(null);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme === "light" ? "light" : "dark";
+    localStorage.setItem("cyberpme_theme", theme);
+  }, [theme]);
 
   async function loadData(token = sessionToken) {
     if (!token) return;
@@ -135,7 +143,11 @@ function App() {
     if (!sessionToken) { setCurrentUser(null); return; }
     fetch(`${API_URL}/api/v1/auth/me`, { headers: { Authorization: `Bearer ${sessionToken}` } })
       .then(response => { if (!response.ok) throw new Error(); return response.json(); })
-      .then(user => { setCurrentUser(user); loadData(sessionToken); })
+      .then(user => {
+        setCurrentUser(user);
+        setTheme(user.theme || "dark");
+        loadData(sessionToken);
+      })
       .catch(() => { localStorage.removeItem("cyberpme_session"); setSessionToken(""); setCurrentUser(null); });
     const timer = setInterval(() => loadData(sessionToken), 10000);
     return () => clearInterval(timer);
@@ -159,6 +171,11 @@ function App() {
     setCurrentUser(null);
   }
 
+  function themeChanged(user) {
+    setCurrentUser(user);
+    setTheme(user.theme);
+  }
+
   const invitationToken = invitationTokenFromHash();
   if (invitationToken) {
     return <InvitationPage apiUrl={API_URL} token={invitationToken} onAuthenticated={(session) => {
@@ -176,7 +193,15 @@ function App() {
   else if (activePage === "reports") page = <ReportsPage apiUrl={API_URL} token={sessionToken} scans={networkScans}/>;
   else if (activePage === "backups") page = <BackupsPage checks={backupChecks}/>;
   else if (activePage === "ids") page = <SecurityEventsPage apiUrl={API_URL} token={sessionToken} events={securityEvents} connectors={idsConnectors} servers={servers} currentUser={currentUser} onCreated={loadData}/>;
-  else if (activePage === "settings") page = <SettingsPage apiUrl={API_URL} token={sessionToken} currentUser={currentUser} onPasswordChanged={passwordChanged}/>;
+  else if (activePage === "settings") page = (
+    <SettingsPage
+      apiUrl={API_URL}
+      token={sessionToken}
+      currentUser={currentUser}
+      onPasswordChanged={passwordChanged}
+      onThemeChanged={themeChanged}
+    />
+  );
   else page = <OverviewPage servers={servers} alerts={alerts} error={error}/>;
 
   return <AppShell activePage={activePage} onNavigate={navigate} apiOnline={!error} isRefreshing={isRefreshing} lastUpdated={lastUpdated} onRefresh={() => loadData()} currentUser={currentUser} onLogout={logout}>
