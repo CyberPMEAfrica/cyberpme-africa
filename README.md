@@ -67,3 +67,12 @@ Les collaborateurs sont ajoutés par invitation sécurisée :
 - le destinataire choisit son propre mot de passe ;
 - une nouvelle invitation révoque automatiquement le lien précédent ;
 - un lien accepté, expiré ou révoqué ne peut pas être réutilisé.
+
+## Journal d'audit
+
+Les actions sensibles sont conservées dans un journal append-only propre à
+chaque PME : connexions, changements de mot de passe, invitations, gestion des
+rôles et comptes, traitement des incidents et connecteurs IDS. Seuls le
+propriétaire et les administrateurs peuvent consulter cet historique depuis
+**Paramètres**. Aucun mot de passe, jeton de session ou secret de connecteur
+n'est enregistré dans les détails du journal.

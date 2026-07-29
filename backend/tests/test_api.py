@@ -180,6 +180,83 @@ def test_team_permissions_and_tenant_isolation(client: TestClient, user_headers:
     ).status_code == 404
 
 
+def test_audit_log_is_append_only_authorized_and_tenant_scoped(
+    client: TestClient,
+    user_headers: dict[str, str],
+):
+    created = client.post(
+        "/api/v1/users",
+        json={
+            "email": "audit-viewer@example.test",
+            "password": "Audit-viewer-password-2026",
+            "role": "viewer",
+        },
+        headers=user_headers,
+    )
+    assert created.status_code == 201
+    client.patch(
+        f"/api/v1/users/{created.json()['id']}",
+        json={"is_active": False},
+        headers=user_headers,
+    )
+
+    audit_response = client.get("/api/v1/audit-entries", headers=user_headers)
+    assert audit_response.status_code == 200
+    entries = audit_response.json()
+    actions = {entry["action"] for entry in entries}
+    assert {"auth.login", "user.created", "user.updated"}.issubset(actions)
+    assert all(entry["actor_email"] == "owner@example.test" for entry in entries)
+    serialized = audit_response.text.lower()
+    assert "audit-viewer-password-2026" not in serialized
+    assert "access_token" not in serialized
+    assert client.patch("/api/v1/audit-entries", json={}, headers=user_headers).status_code == 405
+    assert client.delete("/api/v1/audit-entries", headers=user_headers).status_code == 405
+
+    with SessionLocal() as db:
+        organization = db.query(Organization).filter_by(slug="pme-test").one()
+        viewer = db.query(User).filter_by(
+            organization_id=organization.id,
+            email="audit-viewer@example.test",
+        ).one()
+        viewer.is_active = True
+        other = Organization(name="PME Audit Isolée", slug="audit-isolee")
+        db.add(other)
+        db.flush()
+        db.add(
+            User(
+                organization_id=other.id,
+                email="owner@audit-isolee.test",
+                password_hash=hash_password("Isolated-audit-password-2026"),
+                role="owner",
+            )
+        )
+        db.commit()
+
+    viewer_login = client.post(
+        "/api/v1/auth/login",
+        json={
+            "organization_slug": "pme-test",
+            "email": "audit-viewer@example.test",
+            "password": "Audit-viewer-password-2026",
+        },
+    ).json()
+    viewer_headers = {"Authorization": f"Bearer {viewer_login['access_token']}"}
+    assert client.get("/api/v1/audit-entries", headers=viewer_headers).status_code == 403
+
+    isolated_login = client.post(
+        "/api/v1/auth/login",
+        json={
+            "organization_slug": "audit-isolee",
+            "email": "owner@audit-isolee.test",
+            "password": "Isolated-audit-password-2026",
+        },
+    ).json()
+    isolated_headers = {"Authorization": f"Bearer {isolated_login['access_token']}"}
+    isolated_entries = client.get("/api/v1/audit-entries", headers=isolated_headers).json()
+    assert len(isolated_entries) == 1
+    assert isolated_entries[0]["actor_email"] == "owner@audit-isolee.test"
+
+
 def test_user_changes_password_and_sessions_are_revoked(client: TestClient, user_headers: dict[str, str]):
     changed = client.post(
         "/api/v1/auth/change-password",

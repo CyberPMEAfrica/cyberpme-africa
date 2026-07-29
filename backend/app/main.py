@@ -16,13 +16,14 @@ from app.config import settings
 from app.auth import hash_password, hash_session_token, issue_session_token, verify_password
 from app.database import Base, engine, get_db
 from app.email_notifications import send_alert_email, send_invitation_email
-from app.models import AgentCredential, Alert, BackupCheck, IdsConnector, Metric, NetworkScan, Organization, SecurityEvent, Server, SslCheck, User, UserInvitation, UserSession
+from app.models import AgentCredential, Alert, AuditEntry, BackupCheck, IdsConnector, Metric, NetworkScan, Organization, SecurityEvent, Server, SslCheck, User, UserInvitation, UserSession
 from app.network_scanner import run_network_scan, validate_private_target
 from app.network_report import build_network_scan_pdf
 from app.schemas import (
     AgentRegistration,
     AgentRegistrationRead,
     AlertRead,
+    AuditEntryRead,
     BackupCheckCreate,
     BackupCheckRead,
     IdsConnectorCreate,
@@ -209,6 +210,29 @@ def require_role(user: User, *roles: str) -> None:
         raise HTTPException(status_code=403, detail="Droits insuffisants pour cette action.")
 
 
+def record_audit(
+    db: Session,
+    organization: Organization,
+    actor_email: str,
+    actor_role: str,
+    action: str,
+    target_type: str,
+    target_id: UUID | str | None = None,
+    details: dict | None = None,
+) -> AuditEntry:
+    entry = AuditEntry(
+        organization_id=organization.id,
+        actor_email=actor_email,
+        actor_role=actor_role,
+        action=action,
+        target_type=target_type,
+        target_id=str(target_id) if target_id is not None else None,
+        details=details or {},
+    )
+    db.add(entry)
+    return entry
+
+
 def invitation_state(invitation: UserInvitation) -> str:
     now = datetime.now(timezone.utc)
     expires_at = invitation.expires_at
@@ -273,6 +297,15 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> SessionRead:
     raw_token, token_digest = issue_session_token()
     expires_at = datetime.now(timezone.utc) + timedelta(hours=12)
     db.add(UserSession(user_id=user.id, token_hash=token_digest, expires_at=expires_at))
+    record_audit(
+        db,
+        organization,
+        user.email,
+        user.role,
+        "auth.login",
+        "user",
+        user.id,
+    )
     db.commit()
     return SessionRead(access_token=raw_token, expires_at=expires_at)
 
@@ -295,12 +328,21 @@ def logout(
     context: tuple[User, Organization] = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> Response:
-    del context
+    user, organization = context
     token = authorization.removeprefix("Bearer ").strip() if authorization else ""
     session = db.scalar(select(UserSession).where(UserSession.token_hash == hash_session_token(token)))
     if session:
         db.delete(session)
-        db.commit()
+    record_audit(
+        db,
+        organization,
+        user.email,
+        user.role,
+        "auth.logout",
+        "user",
+        user.id,
+    )
+    db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -310,13 +352,22 @@ def change_password(
     context: tuple[User, Organization] = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> Response:
-    user, _ = context
+    user, organization = context
     if not verify_password(payload.current_password, user.password_hash):
         raise HTTPException(status_code=400, detail="Le mot de passe actuel est incorrect.")
     if payload.current_password == payload.new_password:
         raise HTTPException(status_code=400, detail="Le nouveau mot de passe doit Ãªtre diffÃ©rent.")
     user.password_hash = hash_password(payload.new_password)
     db.execute(delete(UserSession).where(UserSession.user_id == user.id))
+    record_audit(
+        db,
+        organization,
+        user.email,
+        user.role,
+        "auth.password_changed",
+        "user",
+        user.id,
+    )
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -327,6 +378,25 @@ def get_organization(
 ) -> OrganizationRead:
     _, organization = context
     return OrganizationRead.model_validate(organization)
+
+
+@app.get("/api/v1/audit-entries", response_model=list[AuditEntryRead])
+def list_audit_entries(
+    limit: int = 100,
+    context: tuple[User, Organization] = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> list[AuditEntry]:
+    user, organization = context
+    require_role(user, "owner", "admin")
+    safe_limit = max(1, min(limit, 250))
+    return list(
+        db.scalars(
+            select(AuditEntry)
+            .where(AuditEntry.organization_id == organization.id)
+            .order_by(AuditEntry.created_at.desc())
+            .limit(safe_limit)
+        )
+    )
 
 
 @app.patch("/api/v1/organization", response_model=OrganizationRead)
@@ -340,7 +410,18 @@ def update_organization(
     normalized_name = payload.name.strip()
     if len(normalized_name) < 2:
         raise HTTPException(status_code=422, detail="Le nom de la PME doit contenir au moins 2 caractÃ¨res.")
+    previous_name = organization.name
     organization.name = normalized_name
+    record_audit(
+        db,
+        organization,
+        user.email,
+        user.role,
+        "organization.renamed",
+        "organization",
+        organization.id,
+        {"previous_name": previous_name, "new_name": normalized_name},
+    )
     db.commit()
     db.refresh(organization)
     return OrganizationRead.model_validate(organization)
@@ -380,6 +461,17 @@ def create_user(
     )
     db.add(user)
     try:
+        db.flush()
+        record_audit(
+            db,
+            organization,
+            actor.email,
+            actor.role,
+            "user.created",
+            "user",
+            user.id,
+            {"email": user.email, "role": user.role},
+        )
         db.commit()
     except IntegrityError as exc:
         db.rollback()
@@ -406,12 +498,30 @@ def update_user(
         raise HTTPException(status_code=400, detail="Le compte propriÃ©taire actif ne peut pas Ãªtre modifiÃ© ici.")
     if actor.role == "admin" and (target.role == "admin" or payload.role == "admin"):
         raise HTTPException(status_code=403, detail="Seul le propriÃ©taire peut gÃ©rer les administrateurs.")
+    previous_role = target.role
+    previous_active = target.is_active
     if payload.role is not None:
         target.role = payload.role
     if payload.is_active is not None:
         target.is_active = payload.is_active
         if not target.is_active:
             db.execute(delete(UserSession).where(UserSession.user_id == target.id))
+    changes = {}
+    if target.role != previous_role:
+        changes["role"] = {"from": previous_role, "to": target.role}
+    if target.is_active != previous_active:
+        changes["is_active"] = {"from": previous_active, "to": target.is_active}
+    if changes:
+        record_audit(
+            db,
+            organization,
+            actor.email,
+            actor.role,
+            "user.updated",
+            "user",
+            target.id,
+            {"email": target.email, "changes": changes},
+        )
     db.commit()
     db.refresh(target)
     return target
@@ -475,6 +585,17 @@ def create_invitation(
         expires_at=now + timedelta(hours=24),
     )
     db.add(invitation)
+    db.flush()
+    record_audit(
+        db,
+        organization,
+        actor.email,
+        actor.role,
+        "invitation.created",
+        "invitation",
+        invitation.id,
+        {"email": email, "role": payload.role, "expires_at": invitation.expires_at.isoformat()},
+    )
     db.commit()
     db.refresh(invitation)
 
@@ -563,6 +684,16 @@ def accept_invitation(
             token_hash=session_digest,
             expires_at=session_expires_at,
         )
+    )
+    record_audit(
+        db,
+        organization,
+        user.email,
+        user.role,
+        "invitation.accepted",
+        "invitation",
+        invitation.id,
+        {"email": user.email, "role": user.role},
     )
     try:
         db.commit()
@@ -908,6 +1039,7 @@ def update_security_incident(
     if event is None:
         raise HTTPException(status_code=404, detail="Incident introuvable.")
     now = datetime.now(timezone.utc)
+    previous_status = event.status
     if payload.status == "resolved":
         note = (payload.resolution_note or "").strip()
         if len(note) < 3:
@@ -931,6 +1063,21 @@ def update_security_incident(
         event.acknowledged_at = None
         event.resolved_at = None
         event.resolution_note = (payload.resolution_note or "").strip() or None
+    record_audit(
+        db,
+        organization,
+        user.email,
+        user.role,
+        "security_incident.status_changed",
+        "security_event",
+        event.id,
+        {
+            "from": previous_status,
+            "to": event.status,
+            "rule_id": event.rule_id,
+            "server_id": str(event.server_id),
+        },
+    )
     db.commit()
     db.refresh(event)
     return security_event_response(db, event)
@@ -973,6 +1120,21 @@ def create_ids_connector(
     )
     db.add(connector)
     try:
+        db.flush()
+        record_audit(
+            db,
+            organization,
+            user.email,
+            user.role,
+            "ids_connector.created",
+            "ids_connector",
+            connector.id,
+            {
+                "name": connector.name,
+                "connector_type": connector.connector_type,
+                "server_id": str(connector.server_id),
+            },
+        )
         db.commit()
     except IntegrityError:
         db.rollback()
@@ -1002,6 +1164,16 @@ def delete_ids_connector(
     )
     if connector is None:
         raise HTTPException(status_code=404, detail="Connecteur introuvable.")
+    record_audit(
+        db,
+        organization,
+        user.email,
+        user.role,
+        "ids_connector.revoked",
+        "ids_connector",
+        connector.id,
+        {"name": connector.name, "connector_type": connector.connector_type},
+    )
     db.delete(connector)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
