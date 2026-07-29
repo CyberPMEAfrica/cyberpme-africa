@@ -205,6 +205,18 @@ class OrganizationUpdate(BaseModel):
     name: str = Field(min_length=2, max_length=120)
 
 
+class AuditEntryRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    actor_email: str
+    actor_role: str
+    action: str
+    target_type: str
+    target_id: str | None
+    details: dict
+    created_at: datetime
+
+
 class UserCreate(BaseModel):
     email: str = Field(
         min_length=5,

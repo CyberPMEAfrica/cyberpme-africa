@@ -155,6 +155,26 @@ class Organization(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
+class AuditEntry(Base):
+    __tablename__ = "audit_entries"
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    organization_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        index=True,
+    )
+    actor_email: Mapped[str] = mapped_column(String(254), index=True)
+    actor_role: Mapped[str] = mapped_column(String(20))
+    action: Mapped[str] = mapped_column(String(80), index=True)
+    target_type: Mapped[str] = mapped_column(String(40), index=True)
+    target_id: Mapped[str | None] = mapped_column(String(64))
+    details: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        index=True,
+    )
+
+
 class User(Base):
     __tablename__ = "users"
     __table_args__ = (UniqueConstraint("organization_id", "email", name="uq_user_organization_email"),)

@@ -7,6 +7,29 @@ const roleLabels = {
   viewer: "Lecture seule",
 };
 
+const auditActionLabels = {
+  "auth.login": "Connexion réussie",
+  "auth.logout": "Déconnexion",
+  "auth.password_changed": "Mot de passe modifié",
+  "organization.renamed": "Organisation renommée",
+  "user.created": "Compte créé",
+  "user.updated": "Compte modifié",
+  "invitation.created": "Invitation envoyée",
+  "invitation.accepted": "Invitation acceptée",
+  "security_incident.status_changed": "Incident mis à jour",
+  "ids_connector.created": "Connecteur IDS créé",
+  "ids_connector.revoked": "Connecteur IDS révoqué",
+};
+
+function auditTarget(entry) {
+  const details = entry.details || {};
+  if (details.email) return details.email;
+  if (details.name) return details.name;
+  if (details.new_name) return details.new_name;
+  if (details.rule_id) return `Règle ${details.rule_id}`;
+  return entry.target_type;
+}
+
 const fieldLabels = {
   email: "Adresse e-mail",
   password: "Mot de passe initial",
@@ -61,6 +84,7 @@ export default function SettingsPage({ apiUrl, token, currentUser, onPasswordCha
   const [organization, setOrganization] = useState(null);
   const [users, setUsers] = useState([]);
   const [invitations, setInvitations] = useState([]);
+  const [auditEntries, setAuditEntries] = useState([]);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -74,12 +98,14 @@ export default function SettingsPage({ apiUrl, token, currentUser, onPasswordCha
       if (canManageTeam) {
         requests.push(apiRequest(`${apiUrl}/api/v1/users`, token));
         requests.push(apiRequest(`${apiUrl}/api/v1/invitations`, token));
+        requests.push(apiRequest(`${apiUrl}/api/v1/audit-entries?limit=100`, token));
       }
-      const [organizationData, userData = [], invitationData = []] = await Promise.all(requests);
+      const [organizationData, userData = [], invitationData = [], auditData = []] = await Promise.all(requests);
       setOrganization(organizationData);
       setOrganizationName(organizationData.name);
       setUsers(userData);
       setInvitations(invitationData);
+      setAuditEntries(auditData);
       setError("");
     } catch (requestError) {
       setError(requestError.message);
@@ -305,6 +331,39 @@ export default function SettingsPage({ apiUrl, token, currentUser, onPasswordCha
           </div>
         )}
       </div>
+
+      {canManageTeam && (
+        <section className="audit-panel">
+          <div className="audit-panel-heading">
+            <div>
+              <p className="eyebrow">TRAÇABILITÉ</p>
+              <h3>Journal d’audit</h3>
+              <p>Historique sécurisé des actions sensibles de cette PME.</p>
+            </div>
+            <span>{auditEntries.length} événement{auditEntries.length > 1 ? "s" : ""}</span>
+          </div>
+          <div className="audit-list">
+            {auditEntries.length === 0 && (
+              <p className="audit-empty">Aucune action n’a encore été enregistrée.</p>
+            )}
+            {auditEntries.map((entry) => (
+              <article className="audit-entry" key={entry.id}>
+                <span className="audit-dot" aria-hidden="true" />
+                <div>
+                  <strong>{auditActionLabels[entry.action] || entry.action}</strong>
+                  <p>{entry.actor_email} · {roleLabels[entry.actor_role] || entry.actor_role}</p>
+                </div>
+                <div className="audit-target">
+                  <span>{auditTarget(entry)}</span>
+                  <time dateTime={entry.created_at}>
+                    {new Date(entry.created_at).toLocaleString("fr-FR")}
+                  </time>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
     </section>
   );
 }

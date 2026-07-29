@@ -123,10 +123,9 @@ Le blocage automatique est désactivé par défaut. Toute action est journalisé
 
 ## Étapes avant production
 
-1. Organisations, utilisateurs, rôles et isolation des requêtes.
-2. Migrations de base versionnées.
-3. Adaptateurs automatiques Wazuh/Suricata et rotation des jetons de connecteur.
-4. Journal d'audit immuable.
-5. HTTPS, domaine, rotation des secrets et sauvegarde hors machine.
-6. Tests de charge, restauration, reprise après incident et sécurité.
-7. Abonnements, quotas, facturation et support.
+1. Migrations de base versionnées.
+2. Adaptateurs automatiques Wazuh/Suricata et rotation des jetons de connecteur.
+3. Renforcement du journal append-only par une politique d'archivage externe.
+4. HTTPS, domaine, rotation des secrets et sauvegarde hors machine.
+5. Tests de charge, restauration, reprise après incident et sécurité.
+6. Abonnements, quotas, facturation et support.
