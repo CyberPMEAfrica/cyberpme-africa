@@ -1,6 +1,7 @@
 services:
   database:
     image: postgres:17-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-cyberpme}
       POSTGRES_USER: ${POSTGRES_USER:-cyberpme}
@@ -14,6 +15,7 @@ services:
       retries: 10
   backend:
     build: ./backend
+    restart: unless-stopped
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://cyberpme:change-me-in-production@database:5432/cyberpme}
       SMTP_HOST: ${SMTP_HOST:-mailpit}
@@ -41,10 +43,12 @@ services:
       context: ./frontend
       args:
         VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+    restart: unless-stopped
     ports: ["5173:80"]
     depends_on: [backend]
   mailpit:
     image: axllent/mailpit:latest
+    restart: unless-stopped
     ports:
       - "8025:8025"
 volumes:
