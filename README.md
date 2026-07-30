@@ -62,13 +62,15 @@ CyberPME reçoit un format d'événement commun et ne dépend pas d'un moteur ID
 particulier :
 
 - l'adaptateur Wazuh utilise le module Integrator officiel ;
-- l'adaptateur Suricata lit progressivement les alertes du fichier EVE JSON ;
+- l'adaptateur Suricata lit progressivement EVE JSON et conserve les alertes
+  dans une file locale persistante jusqu'à leur confirmation par l'API ;
 - chaque connecteur possède une URL et un jeton propres à l'organisation ;
 - les événements non liés à une alerte sont ignorés pour limiter la charge.
 
 Consultez `integrations/wazuh/README.md` et
-`integrations/suricata/README.md`. L'adaptateur Suricata peut être validé sans
-installer le moteur IDS :
+`integrations/suricata/README.md`. Un installateur systemd est fourni pour les
+capteurs Linux. L'adaptateur Suricata peut aussi être validé sans installer le
+moteur IDS :
 
 ```powershell
 python integrations/suricata/cyberpme-suricata `

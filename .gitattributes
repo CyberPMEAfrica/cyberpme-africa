@@ -1,1 +1,4 @@
 *.sh text eol=lf
+integrations/suricata/cyberpme-suricata text eol=lf
+integrations/wazuh/configure-cyberpme text eol=lf
+integrations/wazuh/custom-cyberpme text eol=lf

@@ -34,6 +34,7 @@ export CYBERPME_SURICATA_ENDPOINT="https://api.example.com/api/v1/ids-connectors
 export CYBERPME_SURICATA_TOKEN="CONNECTOR_TOKEN"
 export CYBERPME_SURICATA_EVE_FILE="/var/log/suricata/eve.json"
 export CYBERPME_SURICATA_STATE_FILE="/var/lib/cyberpme-suricata/state.json"
+export CYBERPME_SURICATA_QUEUE_DIR="/var/lib/cyberpme-suricata/queue"
 
 python3 /usr/local/bin/cyberpme-suricata
 ```
@@ -44,9 +45,71 @@ rotation de `eve.json`, la lecture reprend automatiquement au début du nouveau
 fichier. L'API CyberPME reste également idempotente grâce à la clé stable de
 chaque événement.
 
-En cas d'échec réseau, l'événement fautif n'est pas validé dans le fichier
-d'état et sera retenté au prochain lancement. La file locale persistante et le
-service automatique seront ajoutés dans l'étape suivante de l'intégration.
+Chaque alerte est d'abord écrite atomiquement dans une file locale, puis la
+progression EVE est validée. Elle n'est supprimée de la file qu'après une
+réponse positive de l'API. Une coupure Internet, un redémarrage du capteur ou
+une indisponibilité temporaire du SaaS ne provoque donc pas de perte.
+
+La file est limitée à 50 Mio par défaut. Si elle atteint cette limite,
+l'adaptateur arrête de valider la progression du journal plutôt que de supprimer
+des alertes silencieusement. Les valeurs suivantes peuvent être adaptées à la
+taille et au débit du capteur :
+
+```bash
+export CYBERPME_SURICATA_MAX_QUEUE_MB="100"
+export CYBERPME_SURICATA_MAX_DELIVERIES="1000"
+```
+
+Une entrée locale illisible est déplacée dans le sous-répertoire
+`queue/quarantine` afin de ne pas bloquer les autres alertes. Les doublons sont
+coalescés grâce à la clé stable de l'événement et l'API reste idempotente.
+
+## Installation Linux automatisée
+
+L'installateur fonctionne sur une distribution Linux utilisant systemd et
+Python 3.10 ou plus récent. Sur le capteur Suricata :
+
+```bash
+cd integrations/suricata
+sudo ./install.sh
+```
+
+Il demande l'URL d'ingestion, le jeton masqué et le chemin EVE. Il crée ensuite :
+
+- un compte système sans shell ;
+- une configuration protégée dans `/etc/cyberpme-suricata/adapter.env` ;
+- une file privée dans `/var/lib/cyberpme-suricata/queue` ;
+- un service `oneshot` renforcé et un minuteur systemd exécuté toutes les
+  15 secondes.
+
+Le groupe propriétaire du fichier EVE est détecté automatiquement. Pour une
+installation non interactive ou un chemin atypique, les mêmes variables
+d'environnement peuvent être fournies avant `sudo -E ./install.sh`. La variable
+`CYBERPME_SURICATA_LOG_GROUP` permet de préciser explicitement le groupe ayant
+accès au journal.
+
+Commandes d'exploitation :
+
+```bash
+systemctl status cyberpme-suricata.timer --no-pager
+journalctl -u cyberpme-suricata.service -n 50 --no-pager
+sudo systemctl start cyberpme-suricata.service
+```
+
+La désinstallation conserve la configuration et la file par défaut :
+
+```bash
+sudo ./uninstall.sh
+```
+
+La suppression complète est volontairement explicite :
+
+```bash
+sudo ./uninstall.sh --purge
+```
+
+Ne lancez `--purge` qu'après avoir vérifié que la file ne contient plus
+d'alertes à transmettre.
 
 ## Ressources et stockage
 

@@ -65,6 +65,10 @@ jobs:
         run: pytest -q integrations/tests
       - name: Vérifier le configurateur Wazuh
         run: bash -n integrations/wazuh/configure-cyberpme
+      - name: Vérifier les scripts Suricata
+        run: |
+          bash -n integrations/suricata/install.sh
+          bash -n integrations/suricata/uninstall.sh
 
   frontend:
     name: Build frontend
