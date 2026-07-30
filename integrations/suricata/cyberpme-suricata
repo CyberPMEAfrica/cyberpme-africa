@@ -1,0 +1,299 @@
+#!/usr/bin/env python3
+"""Adaptateur incrémental Suricata EVE JSON vers CyberPME Africa."""
+
+from __future__ import annotations
+
+import argparse
+from datetime import datetime, timezone
+import hashlib
+import json
+import os
+from pathlib import Path
+import sys
+from typing import BinaryIO, Callable
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
+
+
+DEFAULT_EVE_FILE = "/var/log/suricata/eve.json"
+DEFAULT_STATE_FILE = "/var/lib/cyberpme-suricata/state.json"
+
+
+def severity_from_suricata(value: object) -> str:
+    try:
+        level = int(value)
+    except (TypeError, ValueError):
+        level = 3
+    if level <= 1:
+        return "critical"
+    if level == 2:
+        return "high"
+    if level == 3:
+        return "medium"
+    return "low"
+
+
+def category_from_suricata(value: object) -> str:
+    category = str(value or "").lower()
+    if any(word in category for word in ("auth", "credential", "login", "password", "brute force")):
+        return "authentication"
+    if any(word in category for word in ("malware", "trojan", "virus", "ransom", "botnet", "command and control")):
+        return "malware"
+    if any(
+        word in category
+        for word in (
+            "vulnerab",
+            "exploit",
+            "web application attack",
+            "privilege gain",
+            "code execution",
+        )
+    ):
+        return "vulnerability"
+    return "network"
+
+
+def normalize_timestamp(value: object) -> str:
+    if value in (None, ""):
+        return datetime.now(timezone.utc).isoformat()
+    text = str(value)
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return datetime.now(timezone.utc).isoformat()
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat()
+
+
+def event_fingerprint(event: dict, signature_id: str, timestamp: str) -> str:
+    identity = {
+        "timestamp": timestamp,
+        "flow_id": event.get("flow_id"),
+        "pcap_cnt": event.get("pcap_cnt"),
+        "tx_id": event.get("tx_id"),
+        "signature_id": signature_id,
+        "src_ip": event.get("src_ip"),
+        "src_port": event.get("src_port"),
+        "dest_ip": event.get("dest_ip"),
+        "dest_port": event.get("dest_port"),
+    }
+    encoded = json.dumps(identity, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()[:24]
+
+
+def normalize_suricata_alert(event: dict) -> dict:
+    if event.get("event_type") != "alert":
+        raise ValueError("L'événement EVE n'est pas une alerte Suricata.")
+    alert = event.get("alert")
+    if not isinstance(alert, dict):
+        raise ValueError("Le bloc alert est absent de l'événement Suricata.")
+
+    signature_id = str(alert.get("signature_id") or "unknown")
+    timestamp = normalize_timestamp(event.get("timestamp"))
+    signature = str(alert.get("signature") or "Alerte Suricata")
+    suricata_category = str(alert.get("category") or "Catégorie non fournie")
+    action = str(alert.get("action") or "unknown")
+    protocol = str(event.get("proto") or "unknown")
+    source_port = event.get("src_port")
+    destination_port = event.get("dest_port")
+    source = str(event.get("src_ip") or "inconnue")
+    destination = str(event.get("dest_ip") or "inconnue")
+    if source_port is not None:
+        source = f"{source}:{source_port}"
+    if destination_port is not None:
+        destination = f"{destination}:{destination_port}"
+    description = (
+        f"{signature}. Catégorie Suricata : {suricata_category}. "
+        f"Action : {action}. Flux {protocol} : {source} -> {destination}."
+    )
+    fingerprint = event_fingerprint(event, signature_id, timestamp)
+
+    return {
+        "event_key": f"suricata-{signature_id}-{fingerprint}"[:128],
+        "source": "suricata",
+        "category": category_from_suricata(suricata_category),
+        "severity": severity_from_suricata(alert.get("severity")),
+        "title": signature[:200],
+        "description": description[:4000],
+        "source_ip": str(event["src_ip"]) if event.get("src_ip") else None,
+        "destination_ip": str(event["dest_ip"]) if event.get("dest_ip") else None,
+        "rule_id": signature_id[:80],
+        "occurred_at": timestamp,
+    }
+
+
+def validate_endpoint(endpoint: str) -> None:
+    parsed = urlparse(endpoint)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("L'URL d'ingestion CyberPME n'est pas valide.")
+
+
+def post_event(event: dict, endpoint: str, token: str, timeout: float = 10) -> None:
+    payload = json.dumps(event, ensure_ascii=False).encode("utf-8")
+    request = Request(
+        endpoint,
+        data=payload,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "User-Agent": "CyberPME-Suricata-Adapter/1.0",
+        },
+    )
+    with urlopen(request, timeout=timeout) as response:
+        if response.status not in (200, 201):
+            raise RuntimeError(f"Réponse CyberPME inattendue : HTTP {response.status}")
+
+
+def load_offset(state_file: Path, source_stat: os.stat_result) -> int:
+    try:
+        state = json.loads(state_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return 0
+    if state.get("device") != source_stat.st_dev or state.get("inode") != source_stat.st_ino:
+        return 0
+    try:
+        offset = int(state.get("offset", 0))
+    except (TypeError, ValueError):
+        return 0
+    if offset < 0 or offset > source_stat.st_size:
+        return 0
+    return offset
+
+
+def save_offset(state_file: Path, source_stat: os.stat_result, offset: int) -> None:
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    temporary = state_file.with_suffix(f"{state_file.suffix}.tmp")
+    temporary.write_text(
+        json.dumps(
+            {
+                "device": source_stat.st_dev,
+                "inode": source_stat.st_ino,
+                "offset": offset,
+            },
+            separators=(",", ":"),
+        ),
+        encoding="utf-8",
+    )
+    temporary.replace(state_file)
+
+
+def process_stream(
+    stream: BinaryIO,
+    handler: Callable[[dict], None],
+    on_error: Callable[[int, Exception], None] | None = None,
+) -> dict[str, int]:
+    stats = {"lines": 0, "alerts": 0, "ignored": 0, "invalid": 0}
+    for line_number, raw_line in enumerate(stream, start=1):
+        stats["lines"] += 1
+        if not raw_line.strip():
+            stats["ignored"] += 1
+            continue
+        try:
+            event = json.loads(raw_line.decode("utf-8"))
+            if not isinstance(event, dict):
+                raise ValueError("La ligne EVE ne contient pas un objet JSON.")
+            if event.get("event_type") != "alert":
+                stats["ignored"] += 1
+                continue
+            handler(normalize_suricata_alert(event))
+            stats["alerts"] += 1
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError, TypeError) as error:
+            stats["invalid"] += 1
+            if on_error is not None:
+                on_error(line_number, error)
+    return stats
+
+
+def process_file(
+    eve_file: Path,
+    handler: Callable[[dict], None],
+    state_file: Path | None = None,
+    on_error: Callable[[int, Exception], None] | None = None,
+) -> dict[str, int]:
+    with eve_file.open("rb") as stream:
+        source_stat = os.fstat(stream.fileno())
+        if state_file is not None:
+            stream.seek(load_offset(state_file, source_stat))
+        stats = process_stream(stream, handler, on_error)
+        if state_file is not None:
+            save_offset(state_file, source_stat, stream.tell())
+        return stats
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Transmet les alertes Suricata EVE JSON vers CyberPME.")
+    parser.add_argument(
+        "--eve-file",
+        default=os.getenv("CYBERPME_SURICATA_EVE_FILE", DEFAULT_EVE_FILE),
+        help="Chemin du fichier eve.json.",
+    )
+    parser.add_argument(
+        "--state-file",
+        default=os.getenv("CYBERPME_SURICATA_STATE_FILE", DEFAULT_STATE_FILE),
+        help="Fichier de progression incrémentale.",
+    )
+    parser.add_argument(
+        "--endpoint",
+        default=os.getenv("CYBERPME_SURICATA_ENDPOINT", ""),
+        help="URL d'ingestion du connecteur CyberPME.",
+    )
+    parser.add_argument(
+        "--token",
+        default=os.getenv("CYBERPME_SURICATA_TOKEN", ""),
+        help="Jeton du connecteur. Préférer la variable d'environnement.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Affiche les événements normalisés sans réseau ni fichier d'état.",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    eve_file = Path(args.eve_file)
+
+    if not eve_file.is_file():
+        print(f"Fichier EVE introuvable : {eve_file}", file=sys.stderr)
+        return 2
+    if not args.dry_run:
+        try:
+            validate_endpoint(args.endpoint)
+        except ValueError as error:
+            print(error, file=sys.stderr)
+            return 2
+        if not args.token:
+            print("Le jeton du connecteur CyberPME est requis.", file=sys.stderr)
+            return 2
+
+    def report_error(line_number: int, error: Exception) -> None:
+        print(f"Ligne EVE {line_number} ignorée : {error}", file=sys.stderr)
+
+    if args.dry_run:
+        handler = lambda event: print(json.dumps(event, ensure_ascii=False))
+        state_file = None
+    else:
+        handler = lambda event: post_event(event, args.endpoint, args.token)
+        state_file = Path(args.state_file)
+
+    try:
+        stats = process_file(eve_file, handler, state_file, report_error)
+    except (OSError, HTTPError, URLError, RuntimeError) as error:
+        print(f"CyberPME Suricata error: {error}", file=sys.stderr)
+        return 1
+
+    print(
+        "Suricata EVE traité : "
+        f"{stats['lines']} ligne(s), {stats['alerts']} alerte(s), "
+        f"{stats['ignored']} ignorée(s), {stats['invalid']} invalide(s).",
+        file=sys.stderr,
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

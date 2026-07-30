@@ -56,6 +56,26 @@ Le dossier `agent` contient le collecteur Python. Consultez `agent/README.md` po
 
 Chaque agent doit fournir `CYBERPME_ENROLLMENT_KEY` lors de son enregistrement. L'API délivre ensuite un jeton individuel exigé pour chaque envoi de métriques; le jeton brut n'est jamais stocké dans la base.
 
+## Connecteurs IDS
+
+CyberPME reçoit un format d'événement commun et ne dépend pas d'un moteur IDS
+particulier :
+
+- l'adaptateur Wazuh utilise le module Integrator officiel ;
+- l'adaptateur Suricata lit progressivement les alertes du fichier EVE JSON ;
+- chaque connecteur possède une URL et un jeton propres à l'organisation ;
+- les événements non liés à une alerte sont ignorés pour limiter la charge.
+
+Consultez `integrations/wazuh/README.md` et
+`integrations/suricata/README.md`. L'adaptateur Suricata peut être validé sans
+installer le moteur IDS :
+
+```powershell
+python integrations/suricata/cyberpme-suricata `
+  --eve-file integrations/tests/fixtures/suricata-eve.jsonl `
+  --dry-run
+```
+
 ## Envoi e-mail réel
 
 La configuration SMTP se fait uniquement dans le fichier `.env`. Le mode par défaut utilise Mailpit et ne livre aucun message sur Internet. Pour un fournisseur réel, renseignez `SMTP_HOST`, `SMTP_PORT`, `SMTP_USE_TLS`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `ALERT_EMAIL_FROM` et l'adresse publique `FRONTEND_PUBLIC_URL`, puis recréez le conteneur backend.
