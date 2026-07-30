@@ -123,7 +123,8 @@ Le blocage automatique est désactivé par défaut. Toute action est journalisé
 
 ## Étapes avant production
 
-1. Adaptateur Suricata et assistant d'installation multi-plateforme.
+1. File locale persistante et assistant d'installation multi-plateforme pour
+   l'adaptateur Suricata.
 2. Renforcement du journal append-only par une politique d'archivage externe.
 3. HTTPS, domaine, rotation des secrets et sauvegarde hors machine.
 4. Tests de charge, restauration, reprise après incident et sécurité.
