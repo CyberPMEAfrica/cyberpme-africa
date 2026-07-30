@@ -150,6 +150,132 @@ def test_failed_delivery_does_not_advance_state(tmp_path):
     assert len(received) == 2
 
 
+def test_persistent_queue_deduplicates_and_delivers_events(tmp_path):
+    queue_dir = tmp_path / "queue"
+    event = adapter.normalize_suricata_alert(alert_event())
+
+    assert adapter.enqueue_event(queue_dir, event, 1024 * 1024) is True
+    assert adapter.enqueue_event(queue_dir, event, 1024 * 1024) is False
+    assert len(adapter.queue_entries(queue_dir)) == 1
+
+    received = []
+    stats = adapter.flush_queue(queue_dir, received.append)
+
+    assert stats == {"delivered": 1, "invalid": 0, "remaining": 0}
+    assert received == [event]
+    assert adapter.queue_entries(queue_dir) == []
+
+
+def test_delivery_failure_keeps_queue_and_later_retry_succeeds(tmp_path):
+    queue_dir = tmp_path / "queue"
+    event = adapter.normalize_suricata_alert(alert_event())
+    adapter.enqueue_event(queue_dir, event, 1024 * 1024)
+
+    with pytest.raises(RuntimeError, match="API indisponible"):
+        adapter.flush_queue(
+            queue_dir,
+            lambda queued: (_ for _ in ()).throw(RuntimeError("API indisponible")),
+        )
+
+    assert len(adapter.queue_entries(queue_dir)) == 1
+    received = []
+    stats = adapter.flush_queue(queue_dir, received.append)
+    assert stats["delivered"] == 1
+    assert stats["remaining"] == 0
+    assert received == [event]
+
+
+def test_queue_full_does_not_advance_eve_state(tmp_path):
+    eve_file = tmp_path / "eve.json"
+    state_file = tmp_path / "state.json"
+    queue_dir = tmp_path / "queue"
+    eve_file.write_text(json.dumps(alert_event()) + "\n", encoding="utf-8")
+
+    with pytest.raises(adapter.QueueFullError, match="File locale pleine"):
+        adapter.process_file(
+            eve_file,
+            lambda event: adapter.enqueue_event(queue_dir, event, 10),
+            state_file,
+        )
+
+    assert not state_file.exists()
+    assert adapter.queue_entries(queue_dir) == []
+
+
+def test_corrupted_queue_entry_is_quarantined_without_blocking_valid_event(tmp_path):
+    queue_dir = tmp_path / "queue"
+    queue_dir.mkdir()
+    corrupted = queue_dir / "000-corrupted.json"
+    corrupted.write_text("not-json", encoding="utf-8")
+    event = adapter.normalize_suricata_alert(alert_event())
+    adapter.enqueue_event(queue_dir, event, 1024 * 1024)
+    errors = []
+    received = []
+
+    stats = adapter.flush_queue(
+        queue_dir,
+        received.append,
+        on_invalid=lambda path, error: errors.append((path.name, str(error))),
+    )
+
+    assert stats == {"delivered": 1, "invalid": 1, "remaining": 0}
+    assert received == [event]
+    assert errors[0][0] == "000-corrupted.json"
+    assert len(list((queue_dir / "quarantine").glob("*.invalid"))) == 1
+
+
+def test_flush_queue_honors_delivery_limit(tmp_path):
+    queue_dir = tmp_path / "queue"
+    for flow_id in range(3):
+        event = adapter.normalize_suricata_alert(alert_event(flow_id=flow_id))
+        adapter.enqueue_event(queue_dir, event, 1024 * 1024)
+
+    received = []
+    stats = adapter.flush_queue(queue_dir, received.append, max_deliveries=2)
+
+    assert stats["delivered"] == 2
+    assert stats["remaining"] == 1
+    assert len(received) == 2
+
+
+def test_cli_keeps_events_offline_then_flushes_without_rereading_eve(tmp_path, monkeypatch):
+    eve_file = tmp_path / "eve.json"
+    state_file = tmp_path / "state.json"
+    queue_dir = tmp_path / "queue"
+    eve_file.write_text(json.dumps(alert_event()) + "\n", encoding="utf-8")
+    common_args = [
+        "--eve-file",
+        str(eve_file),
+        "--state-file",
+        str(state_file),
+        "--queue-dir",
+        str(queue_dir),
+        "--endpoint",
+        "https://cyberpme.example.test/api/v1/ids-connectors/test/events",
+        "--token",
+        "x" * 32,
+    ]
+
+    monkeypatch.setattr(
+        adapter,
+        "post_event",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("hors ligne")),
+    )
+    assert adapter.main(common_args) == 1
+    assert state_file.exists()
+    assert len(adapter.queue_entries(queue_dir)) == 1
+
+    received = []
+    monkeypatch.setattr(
+        adapter,
+        "post_event",
+        lambda event, *args, **kwargs: received.append(event),
+    )
+    assert adapter.main(common_args + ["--flush-only"]) == 0
+    assert len(received) == 1
+    assert adapter.queue_entries(queue_dir) == []
+
+
 def test_posts_normalized_event_with_connector_token(monkeypatch):
     captured = {}
 
