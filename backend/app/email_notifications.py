@@ -10,6 +10,9 @@ logger = logging.getLogger(__name__)
 
 
 def deliver_email(message: EmailMessage) -> bool:
+    if not settings.smtp_host.strip():
+        logger.info("Notification e-mail non envoyée : aucun serveur SMTP configuré")
+        return False
     try:
         with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=10) as smtp:
             if settings.smtp_use_tls:

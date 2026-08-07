@@ -94,6 +94,14 @@
 .token-rotation-form button { min-width:0; padding:9px 11px; }
 .danger-button { min-width:0; padding:8px 10px; color:#ff9ba1; background:#46232c; }
 .event-heading { margin:10px 0 16px; }
+.event-filter-bar { display:grid; grid-template-columns:minmax(220px,1.5fr) repeat(3,minmax(145px,.7fr)) auto; align-items:end; gap:10px; margin:0 0 16px; padding:14px; border:1px solid #1c3c4c; border-radius:12px; background:#0b2231; }
+.event-filter-bar label { display:grid; gap:6px; color:#91aab7; font-size:11px; font-weight:700; }
+.event-filter-bar input,.event-filter-bar select { width:100%; min-height:39px; padding:9px 10px; border:1px solid #2b4c5d; border-radius:8px; color:#e9f2f7; background:#071a28; outline:none; }
+.event-filter-bar input:focus,.event-filter-bar select:focus { border-color:#2de0a7; box-shadow:0 0 0 3px #2de0a71c; }
+.event-filter-count { align-self:center; color:#7895a5; font-size:12px; white-space:nowrap; }
+.event-timestamps { display:flex; flex-wrap:wrap; gap:6px 12px; margin-top:7px; color:#7895a5; font-size:11px; }
+.event-timestamps span { padding:5px 7px; border-radius:6px; background:#071a28; }
+.event-timestamps b { color:#b8ccd6; }
 @media(max-width:800px){.connector-layout{grid-template-columns:1fr}.connector-list article{grid-template-columns:1fr auto}.connector-list .danger-button{grid-column:1/-1}}
 .incident-filter { display:flex; align-items:center; gap:9px; color:#7895a5; font-size:12px; }
 .incident-filter select { padding:9px 11px; border:1px solid #2b4c5d; border-radius:8px; color:#e9f2f7; background:#071a28; }
@@ -116,3 +124,5 @@
 .resolution-form button { justify-self:start; }
 @media(max-width:700px){.event-heading{align-items:start;flex-direction:column}.incident-filter{width:100%;justify-content:space-between}.incident-badges{align-items:flex-end;flex-direction:column}}
 @media(max-width:900px){.token-rotation-form{grid-template-columns:1fr}.token-rotation-form>div:last-child{flex-wrap:wrap}}
+@media(max-width:1050px){.event-filter-bar{grid-template-columns:repeat(2,minmax(0,1fr))}.event-filter-count{grid-column:1/-1}}
+@media(max-width:620px){.event-filter-bar{grid-template-columns:1fr}}

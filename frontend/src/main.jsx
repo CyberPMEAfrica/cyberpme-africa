@@ -15,7 +15,7 @@ import SecurityEventsPage from "./SecurityEventsPage";
 import SettingsPage from "./SettingsPage";
 import SslMonitor from "./SslMonitor";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const API_URL = (import.meta.env.VITE_API_URL || window.location.origin).replace(/\/$/, "");
 const labels = { unknown: "En attente", online: "Opérationnel", warning: "Attention", critical: "Critique" };
 
 function Metric({ label, value }) {

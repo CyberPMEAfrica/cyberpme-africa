@@ -1,0 +1,54 @@
+services:
+  - type: web
+    name: cyberpme-africa-demo-api
+    runtime: docker
+    rootDir: backend
+    plan: free
+    region: frankfurt
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: cyberpme-africa-demo-db
+          property: connectionString
+      - key: AGENT_ENROLLMENT_KEY
+        generateValue: true
+      - key: NETWORK_SCAN_KEY
+        generateValue: true
+      - key: BOOTSTRAP_ORGANIZATION_NAME
+        value: CyberPME Démonstration
+      - key: BOOTSTRAP_ORGANIZATION_SLUG
+        value: cyberpme-demo
+      - key: BOOTSTRAP_ADMIN_EMAIL
+        sync: false
+      - key: BOOTSTRAP_ADMIN_PASSWORD
+        sync: false
+      - key: FRONTEND_PUBLIC_URL
+        value: https://cyberpme-africa-demo.onrender.com
+      - key: CORS_ORIGINS
+        value: https://cyberpme-africa-demo.onrender.com
+      - key: SMTP_HOST
+        value: ""
+
+  - type: web
+    name: cyberpme-africa-demo
+    runtime: docker
+    rootDir: frontend
+    plan: free
+    region: frankfurt
+    healthCheckPath: /
+    envVars:
+      - key: BACKEND_HOSTPORT
+        fromService:
+          type: web
+          name: cyberpme-africa-demo-api
+          property: hostport
+
+databases:
+  - name: cyberpme-africa-demo-db
+    plan: free
+    region: frankfurt
+    postgresMajorVersion: "17"
+    databaseName: cyberpme
+    user: cyberpme
+    ipAllowList: []

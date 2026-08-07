@@ -334,6 +334,7 @@ def test_secure_invitation_creates_account_only_after_acceptance(
     )
     assert created.status_code == 201
     assert created.json()["email_sent"] is True
+    assert created.json()["invitation_url"] is None
     assert created.json()["status"] == "pending"
     assert sent["recipient"] == "invitee@example.test"
     raw_token = parse_qs(urlparse(sent["invitation_url"]).fragment.split("?", 1)[1])["token"][0]
@@ -362,6 +363,27 @@ def test_secure_invitation_creates_account_only_after_acceptance(
         "/api/v1/invitations/accept",
         json={"token": raw_token, "password": "Another-password-strong-2026"},
     ).status_code == 410
+
+
+def test_failed_invitation_email_returns_personal_link_to_authenticated_manager(
+    client: TestClient,
+    user_headers: dict[str, str],
+    monkeypatch,
+):
+    monkeypatch.setattr("app.main.send_invitation_email", lambda **_: False)
+
+    created = client.post(
+        "/api/v1/invitations",
+        json={"email": "professor@example.test", "role": "viewer"},
+        headers=user_headers,
+    )
+
+    assert created.status_code == 201
+    payload = created.json()
+    assert payload["email_sent"] is False
+    assert "/#/invite?token=" in payload["invitation_url"]
+    raw_token = parse_qs(urlparse(payload["invitation_url"]).fragment.split("?", 1)[1])["token"][0]
+    assert client.get("/api/v1/invitations/preview", params={"token": raw_token}).status_code == 200
 
 
 def test_reinvitation_revokes_previous_link_and_expired_link_is_rejected(

@@ -283,6 +283,7 @@ class InvitationRead(BaseModel):
 
 class InvitationCreated(InvitationRead):
     email_sent: bool
+    invitation_url: str | None = None
 
 
 class InvitationPreview(BaseModel):

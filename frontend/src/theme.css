@@ -123,6 +123,11 @@ article,
 .pending-invitations {
   border-color: var(--theme-border-soft);
 }
+.invitation-link-card { display:grid; gap:8px; margin-top:14px; padding:13px; border:1px solid #ffc857; border-radius:10px; background:#332d18; }
+.invitation-link-card strong { color:#ffc857; }
+.invitation-link-card small { color:#d9c98d; line-height:1.45; }
+.invitation-link-card code { overflow-wrap:anywhere; padding:9px; border-radius:7px; color:#e9f2f7; background:#071a28; font-size:11px; }
+.invitation-link-card button { width:auto; margin-top:0; justify-self:start; }
 
 .metric,
 .audit-panel-heading > span,

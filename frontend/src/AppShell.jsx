@@ -33,6 +33,7 @@ export const activePages = navigation.filter((item) => !item.upcoming).map((item
 
 export default function AppShell({ activePage, onNavigate, apiOnline, isRefreshing, lastUpdated, onRefresh, currentUser, onLogout, children }) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const isLocalEnvironment = ["localhost", "127.0.0.1"].includes(window.location.hostname);
 
   function navigate(page) {
     onNavigate(page);
@@ -57,7 +58,7 @@ export default function AppShell({ activePage, onNavigate, apiOnline, isRefreshi
             <NavIcon name="settings"/><span>Paramètres</span>
           </button>
         </nav>
-        <div className="sidebar-footer"><span className="api-dot online"/><div><strong>CyberPME Local</strong><small>Environnement de développement</small></div></div>
+        <div className="sidebar-footer"><span className="api-dot online"/><div><strong>{isLocalEnvironment ? "CyberPME Local" : "CyberPME Démo"}</strong><small>{isLocalEnvironment ? "Environnement de développement" : "Environnement de démonstration"}</small></div></div>
       </aside>
 
       <div className="app-workspace">

@@ -26,6 +26,7 @@ services:
       ALERT_EMAIL_FROM: ${ALERT_EMAIL_FROM:-alerts@cyberpme.local}
       ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-bocorodrigue43@mail.com}
       FRONTEND_PUBLIC_URL: ${FRONTEND_PUBLIC_URL:-http://localhost:5173}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
       AGENT_ENROLLMENT_KEY: ${AGENT_ENROLLMENT_KEY:?AGENT_ENROLLMENT_KEY must be set}
       NETWORK_SCAN_KEY: ${NETWORK_SCAN_KEY:?NETWORK_SCAN_KEY must be set}
       BOOTSTRAP_ORGANIZATION_NAME: ${BOOTSTRAP_ORGANIZATION_NAME:-CyberPME Lab}
@@ -56,6 +57,9 @@ services:
       args:
         VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
     restart: unless-stopped
+    environment:
+      PORT: 80
+      BACKEND_HOSTPORT: backend:8000
     ports: ["5173:80"]
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1/"]
