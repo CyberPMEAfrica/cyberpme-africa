@@ -82,6 +82,11 @@ Il demande l'URL d'ingestion, le jeton masqué et le chemin EVE. Il crée ensuit
 - un service `oneshot` renforcé et un minuteur systemd exécuté toutes les
   15 secondes.
 
+Le chemin EVE doit être persistant et visible par systemd. Utilisez normalement
+`/var/log/suricata/eve.json`. Les chemins `/tmp` et `/var/tmp` sont refusés car
+le service est isolé avec `PrivateTmp=true`. Pour une démonstration, copiez le
+fichier EVE dans `/var/lib/cyberpme-suricata/` avant l'installation.
+
 Le groupe propriétaire du fichier EVE est détecté automatiquement. Pour une
 installation non interactive ou un chemin atypique, les mêmes variables
 d'environnement peuvent être fournies avant `sudo -E ./install.sh`. La variable

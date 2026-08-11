@@ -3,6 +3,11 @@ import "./scanner.css";
 
 const severityLabels = { low: "Faible", medium: "Moyenne", high: "Élevée", critical: "Critique" };
 const incidentLabels = { new: "Nouveau", acknowledged: "Pris en charge", resolved: "Résolu", active: "Nouveau" };
+const sourceLabels = { wazuh: "Wazuh", suricata: "Suricata", agent: "Agent", other: "Autre" };
+
+function formatEventDate(value) {
+  return value ? new Date(value).toLocaleString("fr-FR") : "—";
+}
 
 export default function SecurityEventsPage({ apiUrl, token, events, connectors, servers, currentUser, onCreated }) {
   const active = events.filter(event => event.status !== "resolved");
@@ -14,14 +19,34 @@ export default function SecurityEventsPage({ apiUrl, token, events, connectors, 
   const [gracePeriodMinutes, setGracePeriodMinutes] = useState(60);
   const [message, setMessage] = useState("");
   const [incidentFilter, setIncidentFilter] = useState("open");
+  const [sourceFilter, setSourceFilter] = useState("all");
+  const [severityFilter, setSeverityFilter] = useState("all");
+  const [eventQuery, setEventQuery] = useState("");
   const [resolvingId, setResolvingId] = useState("");
   const [resolutionNote, setResolutionNote] = useState("");
   const canManage = ["owner", "admin"].includes(currentUser.role);
   const canHandle = ["owner", "admin", "analyst"].includes(currentUser.role);
   const filteredEvents = events.filter(event => {
-    if (incidentFilter === "all") return true;
-    if (incidentFilter === "open") return event.status !== "resolved";
-    return event.status === incidentFilter;
+    const matchesIncident = incidentFilter === "all"
+      || (incidentFilter === "open" && event.status !== "resolved")
+      || event.status === incidentFilter;
+    const matchesSource = sourceFilter === "all" || event.source === sourceFilter;
+    const matchesSeverity = severityFilter === "all" || event.severity === severityFilter;
+    const normalizedQuery = eventQuery.trim().toLocaleLowerCase("fr-FR");
+    const searchableText = [
+      event.title,
+      event.description,
+      event.server_name,
+      event.source,
+      event.category,
+      event.source_ip,
+      event.destination_ip,
+      event.rule_id,
+    ].filter(Boolean).join(" ").toLocaleLowerCase("fr-FR");
+    return matchesIncident
+      && matchesSource
+      && matchesSeverity
+      && (!normalizedQuery || searchableText.includes(normalizedQuery));
   });
 
   async function submit(event) {
@@ -176,13 +201,26 @@ export default function SecurityEventsPage({ apiUrl, token, events, connectors, 
       </div>
     </div>
     <div className="section-heading event-heading">
-      <div><p className="eyebrow">ÉVÉNEMENTS NORMALISÉS</p><h2>Détections récentes</h2></div>
-      <label className="incident-filter">Afficher<select value={incidentFilter} onChange={event => setIncidentFilter(event.target.value)}><option value="open">Incidents ouverts</option><option value="new">Nouveaux</option><option value="acknowledged">Pris en charge</option><option value="resolved">Résolus</option><option value="all">Tous</option></select></label>
+      <div><p className="eyebrow">ÉVÉNEMENTS NORMALISÉS</p><h2>Historique des détections</h2></div>
+    </div>
+    <div className="event-filter-bar" aria-label="Filtres des événements de sécurité">
+      <label>Recherche<input type="search" value={eventQuery} onChange={event => setEventQuery(event.target.value)} placeholder="Titre, adresse IP, règle…" /></label>
+      <label>Technologie<select value={sourceFilter} onChange={event => setSourceFilter(event.target.value)}><option value="all">Toutes</option><option value="wazuh">Wazuh</option><option value="suricata">Suricata</option><option value="agent">Agent</option><option value="other">Autre</option></select></label>
+      <label>Gravité<select value={severityFilter} onChange={event => setSeverityFilter(event.target.value)}><option value="all">Toutes</option><option value="critical">Critique</option><option value="high">Élevée</option><option value="medium">Moyenne</option><option value="low">Faible</option></select></label>
+      <label>Statut<select value={incidentFilter} onChange={event => setIncidentFilter(event.target.value)}><option value="open">Incidents ouverts</option><option value="new">Nouveaux</option><option value="acknowledged">Pris en charge</option><option value="resolved">Résolus</option><option value="all">Tous</option></select></label>
+      <span className="event-filter-count">{filteredEvents.length} résultat{filteredEvents.length > 1 ? "s" : ""}</span>
     </div>
     <div className="security-events">
       {filteredEvents.length ? filteredEvents.map(event => <article className={`security-event ${event.severity} ${event.status}`} key={event.id}>
         <div className="ssl-head">
-          <div><h3>{event.title}</h3><small>{event.server_name} · {event.source.toUpperCase()} · {new Date(event.occurred_at).toLocaleString("fr-FR")}</small></div>
+          <div>
+            <h3>{event.title}</h3>
+            <small>{event.server_name} · {sourceLabels[event.source] || event.source.toUpperCase()}</small>
+            <div className="event-timestamps">
+              <span>Détecté le <b>{formatEventDate(event.occurred_at)}</b></span>
+              <span>Reçu le <b>{formatEventDate(event.received_at)}</b></span>
+            </div>
+          </div>
           <div className="incident-badges"><em className={`incident-status ${event.status}`}>{incidentLabels[event.status] || event.status}</em><em className={`event-severity ${event.severity}`}>{severityLabels[event.severity]}</em></div>
         </div>
         <p>{event.description}</p>

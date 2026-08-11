@@ -64,6 +64,14 @@ if [[ ${CYBERPME_SURICATA_EVE_FILE} != /* ]]; then
   echo "Le chemin EVE doit être absolu." >&2
   exit 1
 fi
+case "${CYBERPME_SURICATA_EVE_FILE}" in
+  /tmp|/tmp/*|/var/tmp|/var/tmp/*)
+    echo "Le fichier EVE ne peut pas être placé dans /tmp ou /var/tmp." >&2
+    echo "Le service utilise PrivateTmp pour son isolation et ne verra pas ce fichier." >&2
+    echo "Utilisez /var/log/suricata/eve.json ou copiez le fichier de test dans un chemin persistant." >&2
+    exit 1
+    ;;
+esac
 if ! [[ ${CYBERPME_SURICATA_MAX_QUEUE_MB} =~ ^[0-9]+([.][0-9]+)?$ ]]; then
   echo "CYBERPME_SURICATA_MAX_QUEUE_MB doit être un nombre positif." >&2
   exit 1

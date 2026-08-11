@@ -115,6 +115,7 @@ export default function SettingsPage({
   const [auditEntries, setAuditEntries] = useState([]);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [invitationLink, setInvitationLink] = useState("");
   const [busy, setBusy] = useState(false);
   const [activeTab, setActiveTab] = useState("organization");
   const [organizationName, setOrganizationName] = useState("");
@@ -150,6 +151,7 @@ export default function SettingsPage({
     setBusy(true);
     setMessage("");
     setError("");
+    setInvitationLink("");
     try {
       const updated = await apiRequest(`${apiUrl}/api/v1/organization`, token, {
         method: "PATCH",
@@ -175,6 +177,7 @@ export default function SettingsPage({
         body: JSON.stringify(newUser),
       });
       setNewUser({ email: "", role: "viewer" });
+      setInvitationLink(invitation.invitation_url || "");
       setMessage(
         invitation.email_sent
           ? "Invitation envoyée. Le lien personnel expirera dans 24 heures."
@@ -343,6 +346,12 @@ export default function SettingsPage({
               </label>
               <small>Le collaborateur recevra un lien personnel valable 24 heures pour choisir son mot de passe.</small>
               <button disabled={busy}>Envoyer l’invitation</button>
+              {invitationLink && <div className="invitation-link-card" role="status">
+                <strong>L’e-mail n’a pas été remis</strong>
+                <small>Copiez ce lien personnel et envoyez-le directement au collaborateur.</small>
+                <code>{invitationLink}</code>
+                <button type="button" className="secondary-button" onClick={() => navigator.clipboard.writeText(invitationLink)}>Copier le lien</button>
+              </div>}
             </form>
 
             <section className="team-panel">

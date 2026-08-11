@@ -98,7 +98,13 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origin_list,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 def require_user(
@@ -206,7 +212,11 @@ def invitation_state(invitation: UserInvitation) -> str:
     return "pending"
 
 
-def invitation_response(invitation: UserInvitation, email_sent: bool | None = None) -> InvitationRead | InvitationCreated:
+def invitation_response(
+    invitation: UserInvitation,
+    email_sent: bool | None = None,
+    invitation_url: str | None = None,
+) -> InvitationRead | InvitationCreated:
     values = {
         "id": invitation.id,
         "email": invitation.email,
@@ -218,7 +228,11 @@ def invitation_response(invitation: UserInvitation, email_sent: bool | None = No
         "created_at": invitation.created_at,
     }
     if email_sent is not None:
-        return InvitationCreated(**values, email_sent=email_sent)
+        return InvitationCreated(
+            **values,
+            email_sent=email_sent,
+            invitation_url=invitation_url,
+        )
     return InvitationRead(**values)
 
 
@@ -601,7 +615,11 @@ def create_invitation(
         invited_by=actor.email,
         invitation_url=invitation_url,
     )
-    return invitation_response(invitation, email_sent=email_sent)
+    return invitation_response(
+        invitation,
+        email_sent=email_sent,
+        invitation_url=None if email_sent else invitation_url,
+    )
 
 
 def get_valid_invitation(raw_token: str, db: Session) -> tuple[UserInvitation, Organization]:
