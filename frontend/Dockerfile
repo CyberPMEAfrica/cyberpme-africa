@@ -12,9 +12,8 @@ COPY default.conf.template /etc/nginx/templates/default.conf.template
 COPY render-start.sh /usr/local/bin/render-start.sh
 RUN chmod +x /usr/local/bin/render-start.sh
 ENV PORT=80 \
-    BACKEND_HOST=backend \
-    BACKEND_PORT=8000 \
-    NGINX_ENVSUBST_FILTER="^(PORT|BACKEND_HOST|BACKEND_PORT)$"
+    BACKEND_URL=http://backend:8000 \
+    NGINX_ENVSUBST_FILTER="^(PORT|BACKEND_URL)$"
 EXPOSE 80
 ENTRYPOINT ["/usr/local/bin/render-start.sh"]
 CMD ["nginx", "-g", "daemon off;"]
