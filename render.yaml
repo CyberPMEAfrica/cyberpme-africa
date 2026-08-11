@@ -40,13 +40,8 @@ services:
     region: frankfurt
     healthCheckPath: /
     envVars:
-      - key: BACKEND_HOST
-        fromService:
-          type: web
-          name: cyberpme-africa-demo-api
-          property: host
-      - key: BACKEND_PORT
-        value: "8000"
+      - key: BACKEND_URL
+        value: https://cyberpme-africa-demo-api.onrender.com
 
 databases:
   - name: cyberpme-africa-demo-db

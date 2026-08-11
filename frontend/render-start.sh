@@ -1,7 +1,8 @@
 #!/bin/sh
 set -eu
 
-backend_host="${BACKEND_HOST:-backend}"
+backend_url="${BACKEND_URL:-http://backend:8000}"
+backend_host="$(printf '%s' "$backend_url" | sed -E 's#^[a-zA-Z]+://##; s#[:/].*$##')"
 attempt=1
 max_attempts=90
 
