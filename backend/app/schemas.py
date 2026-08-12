@@ -261,6 +261,10 @@ class PasswordChange(BaseModel):
     new_password: str = Field(min_length=12, max_length=256)
 
 
+class BootstrapOwnerRecovery(BaseModel):
+    new_password: str = Field(min_length=12, max_length=256)
+
+
 class InvitationCreate(BaseModel):
     email: str = Field(
         min_length=5,
