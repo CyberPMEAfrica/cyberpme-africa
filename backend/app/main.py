@@ -93,6 +93,16 @@ async def lifespan(_: FastAPI):
                         role="owner",
                     )
                 )
+            elif settings.bootstrap_admin_force_sync:
+                password_changed = not verify_password(
+                    settings.bootstrap_admin_password,
+                    user.password_hash,
+                )
+                if password_changed:
+                    user.password_hash = hash_password(settings.bootstrap_admin_password)
+                    db.execute(delete(UserSession).where(UserSession.user_id == user.id))
+                user.role = "owner"
+                user.is_active = True
             db.commit()
     yield
 

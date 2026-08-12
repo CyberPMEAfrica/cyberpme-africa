@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     bootstrap_organization_slug: str = "cyberpme-lab"
     bootstrap_admin_email: str = ""
     bootstrap_admin_password: str = ""
+    bootstrap_admin_force_sync: bool = False
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @field_validator("database_url", mode="before")
