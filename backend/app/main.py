@@ -275,6 +275,13 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> SessionRead:
                 User.email == payload.email.lower(),
             )
         )
+    bootstrap_password_changed = user is not None and db.scalar(
+        select(AuditEntry.id).where(
+            AuditEntry.organization_id == organization.id,
+            AuditEntry.actor_email == payload.email.lower(),
+            AuditEntry.action == "auth.password_changed",
+        )
+    ) is not None
     bootstrap_recovery = (
         settings.bootstrap_admin_force_sync
         and organization is not None
@@ -282,6 +289,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> SessionRead:
         and payload.email.lower() == settings.bootstrap_admin_email.lower()
         and bool(settings.bootstrap_admin_password)
         and hmac.compare_digest(payload.password, settings.bootstrap_admin_password)
+        and not bootstrap_password_changed
     )
     if bootstrap_recovery:
         if user is None:
@@ -397,12 +405,6 @@ def change_password(
     if payload.current_password == payload.new_password:
         raise HTTPException(status_code=400, detail="Le nouveau mot de passe doit Ãªtre diffÃ©rent.")
     user.password_hash = hash_password(payload.new_password)
-    if (
-        settings.bootstrap_admin_force_sync
-        and organization.slug.lower() == settings.bootstrap_organization_slug.lower()
-        and user.email.lower() == settings.bootstrap_admin_email.lower()
-    ):
-        settings.bootstrap_admin_password = payload.new_password
     db.execute(delete(UserSession).where(UserSession.user_id == user.id))
     record_audit(
         db,
