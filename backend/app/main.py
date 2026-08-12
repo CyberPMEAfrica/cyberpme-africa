@@ -275,6 +275,29 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> SessionRead:
                 User.email == payload.email.lower(),
             )
         )
+    bootstrap_recovery = (
+        settings.bootstrap_admin_force_sync
+        and organization is not None
+        and payload.organization_slug.lower() == settings.bootstrap_organization_slug.lower()
+        and payload.email.lower() == settings.bootstrap_admin_email.lower()
+        and bool(settings.bootstrap_admin_password)
+        and hmac.compare_digest(payload.password, settings.bootstrap_admin_password)
+    )
+    if bootstrap_recovery:
+        if user is None:
+            user = User(
+                organization_id=organization.id,
+                email=payload.email.lower(),
+                password_hash=hash_password(settings.bootstrap_admin_password),
+                role="owner",
+            )
+            db.add(user)
+            db.flush()
+        else:
+            user.password_hash = hash_password(settings.bootstrap_admin_password)
+            user.role = "owner"
+            user.is_active = True
+            db.execute(delete(UserSession).where(UserSession.user_id == user.id))
     if user is None or not user.is_active or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Identifiants invalides.")
     raw_token, token_digest = issue_session_token()

@@ -105,6 +105,30 @@ def test_bootstrap_owner_is_recovered_when_force_sync_is_enabled():
         assert owner.is_active is True
 
 
+def test_bootstrap_owner_is_recovered_during_login(client: TestClient):
+    with SessionLocal() as db:
+        owner = db.scalar(select(User).where(User.email == "owner@example.test"))
+        owner.password_hash = hash_password("Obsolete-password-strong-2026")
+        owner.role = "viewer"
+        owner.is_active = False
+        db.commit()
+
+    response = client.post(
+        "/api/v1/auth/login",
+        json={
+            "organization_slug": "pme-test",
+            "email": "owner@example.test",
+            "password": "Test-password-very-strong-2026",
+        },
+    )
+    assert response.status_code == 200
+
+    with SessionLocal() as db:
+        owner = db.scalar(select(User).where(User.email == "owner@example.test"))
+        assert owner.role == "owner"
+        assert owner.is_active is True
+
+
 def test_user_theme_is_validated_persisted_and_audited(
     client: TestClient,
     user_headers: dict[str, str],
