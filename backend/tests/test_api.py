@@ -12,6 +12,7 @@ os.environ["BOOTSTRAP_ORGANIZATION_SLUG"] = "pme-test"
 os.environ["BOOTSTRAP_ADMIN_EMAIL"] = "owner@example.test"
 os.environ["BOOTSTRAP_ADMIN_PASSWORD"] = "Test-password-very-strong-2026"
 os.environ["BOOTSTRAP_ADMIN_FORCE_SYNC"] = "true"
+os.environ["BOOTSTRAP_RECOVERY_KEY"] = "test-bootstrap-recovery-secret"
 
 import pytest
 from fastapi.testclient import TestClient
@@ -127,6 +128,64 @@ def test_bootstrap_owner_is_recovered_during_login(client: TestClient):
         owner = db.scalar(select(User).where(User.email == "owner@example.test"))
         assert owner.role == "owner"
         assert owner.is_active is True
+
+
+def test_bootstrap_owner_can_be_reset_with_recovery_key(client: TestClient):
+    response = client.post(
+        "/api/v1/auth/recover-bootstrap-owner",
+        headers={"X-Recovery-Key": "test-bootstrap-recovery-secret"},
+        json={"new_password": "Recovered-owner-password-2026"},
+    )
+    assert response.status_code == 204
+    login = client.post(
+        "/api/v1/auth/login",
+        json={
+            "organization_slug": "pme-test",
+            "email": "owner@example.test",
+            "password": "Recovered-owner-password-2026",
+        },
+    )
+    assert login.status_code == 200
+
+    old_bootstrap_login = client.post(
+        "/api/v1/auth/login",
+        json={
+            "organization_slug": "pme-test",
+            "email": "owner@example.test",
+            "password": "Test-password-very-strong-2026",
+        },
+    )
+    assert old_bootstrap_login.status_code == 401
+
+
+def test_recovered_bootstrap_password_survives_restart():
+    with TestClient(app) as recovery_client:
+        response = recovery_client.post(
+            "/api/v1/auth/recover-bootstrap-owner",
+            headers={"X-Recovery-Key": "test-bootstrap-recovery-secret"},
+            json={"new_password": "Recovered-owner-password-2026"},
+        )
+        assert response.status_code == 204
+
+    with TestClient(app) as restarted_client:
+        login_after_restart = restarted_client.post(
+            "/api/v1/auth/login",
+            json={
+                "organization_slug": "pme-test",
+                "email": "owner@example.test",
+                "password": "Recovered-owner-password-2026",
+            },
+        )
+        assert login_after_restart.status_code == 200
+
+
+def test_bootstrap_owner_recovery_hides_invalid_key(client: TestClient):
+    response = client.post(
+        "/api/v1/auth/recover-bootstrap-owner",
+        headers={"X-Recovery-Key": "wrong-key"},
+        json={"new_password": "Recovered-owner-password-2026"},
+    )
+    assert response.status_code == 404
 
 
 def test_user_theme_is_validated_persisted_and_audited(

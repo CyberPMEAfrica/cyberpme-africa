@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     bootstrap_admin_email: str = ""
     bootstrap_admin_password: str = ""
     bootstrap_admin_force_sync: bool = False
+    bootstrap_recovery_key: str = ""
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @field_validator("database_url", mode="before")

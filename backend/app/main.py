@@ -26,6 +26,7 @@ from app.schemas import (
     AuditEntryRead,
     BackupCheckCreate,
     BackupCheckRead,
+    BootstrapOwnerRecovery,
     IdsConnectorCreate,
     IdsConnectorCreated,
     IdsConnectorRead,
@@ -94,11 +95,21 @@ async def lifespan(_: FastAPI):
                     )
                 )
             elif settings.bootstrap_admin_force_sync:
+                password_was_explicitly_managed = db.scalar(
+                    select(AuditEntry.id).where(
+                        AuditEntry.organization_id == organization.id,
+                        AuditEntry.target_type == "user",
+                        AuditEntry.target_id == str(user.id),
+                        AuditEntry.action.in_(
+                            ("auth.password_changed", "auth.bootstrap_owner_recovered")
+                        ),
+                    )
+                ) is not None
                 password_changed = not verify_password(
                     settings.bootstrap_admin_password,
                     user.password_hash,
                 )
-                if password_changed:
+                if password_changed and not password_was_explicitly_managed:
                     user.password_hash = hash_password(settings.bootstrap_admin_password)
                     db.execute(delete(UserSession).where(UserSession.user_id == user.id))
                 user.role = "owner"
@@ -275,11 +286,14 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> SessionRead:
                 User.email == payload.email.lower(),
             )
         )
-    bootstrap_password_changed = user is not None and db.scalar(
+    bootstrap_password_managed = organization is not None and user is not None and db.scalar(
         select(AuditEntry.id).where(
             AuditEntry.organization_id == organization.id,
-            AuditEntry.actor_email == payload.email.lower(),
-            AuditEntry.action == "auth.password_changed",
+            AuditEntry.target_type == "user",
+            AuditEntry.target_id == str(user.id),
+            AuditEntry.action.in_(
+                ("auth.password_changed", "auth.bootstrap_owner_recovered")
+            ),
         )
     ) is not None
     bootstrap_recovery = (
@@ -289,7 +303,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> SessionRead:
         and payload.email.lower() == settings.bootstrap_admin_email.lower()
         and bool(settings.bootstrap_admin_password)
         and hmac.compare_digest(payload.password, settings.bootstrap_admin_password)
-        and not bootstrap_password_changed
+        and not bootstrap_password_managed
     )
     if bootstrap_recovery:
         if user is None:
@@ -322,6 +336,66 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> SessionRead:
     )
     db.commit()
     return SessionRead(access_token=raw_token, expires_at=expires_at)
+
+
+@app.post("/api/v1/auth/recover-bootstrap-owner", status_code=status.HTTP_204_NO_CONTENT)
+def recover_bootstrap_owner(
+    payload: BootstrapOwnerRecovery,
+    recovery_key: str = Header(default="", alias="X-Recovery-Key"),
+    db: Session = Depends(get_db),
+) -> Response:
+    if not settings.bootstrap_recovery_key or not hmac.compare_digest(
+        recovery_key,
+        settings.bootstrap_recovery_key,
+    ):
+        raise HTTPException(status_code=404, detail="Ressource introuvable.")
+    organization = db.scalar(
+        select(Organization).where(
+            Organization.slug == settings.bootstrap_organization_slug.lower()
+        )
+    )
+    if organization is None:
+        organization = Organization(
+            name=settings.bootstrap_organization_name,
+            slug=settings.bootstrap_organization_slug.lower(),
+        )
+        db.add(organization)
+        db.flush()
+    email = settings.bootstrap_admin_email.lower()
+    if not email:
+        raise HTTPException(status_code=503, detail="Compte de récupération non configuré.")
+    user = db.scalar(
+        select(User).where(
+            User.organization_id == organization.id,
+            User.email == email,
+        )
+    )
+    if user is None:
+        user = User(
+            organization_id=organization.id,
+            email=email,
+            password_hash=hash_password(payload.new_password),
+            role="owner",
+            is_active=True,
+        )
+        db.add(user)
+        db.flush()
+    else:
+        user.password_hash = hash_password(payload.new_password)
+        user.role = "owner"
+        user.is_active = True
+        db.execute(delete(UserSession).where(UserSession.user_id == user.id))
+    record_audit(
+        db,
+        organization,
+        "system:bootstrap-recovery",
+        "system",
+        "auth.bootstrap_owner_recovered",
+        "user",
+        user.id,
+    )
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.get("/api/v1/auth/me", response_model=CurrentUserRead)
