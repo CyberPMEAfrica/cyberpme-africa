@@ -397,6 +397,12 @@ def change_password(
     if payload.current_password == payload.new_password:
         raise HTTPException(status_code=400, detail="Le nouveau mot de passe doit Ãªtre diffÃ©rent.")
     user.password_hash = hash_password(payload.new_password)
+    if (
+        settings.bootstrap_admin_force_sync
+        and organization.slug.lower() == settings.bootstrap_organization_slug.lower()
+        and user.email.lower() == settings.bootstrap_admin_email.lower()
+    ):
+        settings.bootstrap_admin_password = payload.new_password
     db.execute(delete(UserSession).where(UserSession.user_id == user.id))
     record_audit(
         db,
