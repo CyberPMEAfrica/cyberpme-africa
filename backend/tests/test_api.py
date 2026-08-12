@@ -13,12 +13,14 @@ os.environ["BOOTSTRAP_ADMIN_EMAIL"] = "owner@example.test"
 os.environ["BOOTSTRAP_ADMIN_PASSWORD"] = "Test-password-very-strong-2026"
 os.environ["BOOTSTRAP_ADMIN_FORCE_SYNC"] = "true"
 os.environ["BOOTSTRAP_RECOVERY_KEY"] = "test-bootstrap-recovery-secret"
+os.environ["BOOTSTRAP_ADMIN_RESET_PASSWORD"] = ""
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.auth import hash_password
+from app.config import settings
 from app.database import Base, SessionLocal, engine
 from app.main import app
 from app.models import IdsConnector, Organization, User, UserInvitation
@@ -186,6 +188,26 @@ def test_bootstrap_owner_recovery_hides_invalid_key(client: TestClient):
         json={"new_password": "Recovered-owner-password-2026"},
     )
     assert response.status_code == 404
+
+
+def test_render_environment_can_reset_bootstrap_owner_password():
+    with TestClient(app):
+        pass
+
+    settings.bootstrap_admin_reset_password = "Render-reset-password-2026"
+    try:
+        with TestClient(app) as restarted_client:
+            login = restarted_client.post(
+                "/api/v1/auth/login",
+                json={
+                    "organization_slug": "pme-test",
+                    "email": "owner@example.test",
+                    "password": "Render-reset-password-2026",
+                },
+            )
+            assert login.status_code == 200
+    finally:
+        settings.bootstrap_admin_reset_password = ""
 
 
 def test_user_theme_is_validated_persisted_and_audited(

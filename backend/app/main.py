@@ -86,13 +86,37 @@ async def lifespan(_: FastAPI):
                 )
             )
             if user is None:
+                initial_password = (
+                    settings.bootstrap_admin_reset_password
+                    or settings.bootstrap_admin_password
+                )
                 db.add(
                     User(
                         organization_id=organization.id,
                         email=settings.bootstrap_admin_email.lower(),
-                        password_hash=hash_password(settings.bootstrap_admin_password),
+                        password_hash=hash_password(initial_password),
                         role="owner",
                     )
+                )
+            elif settings.bootstrap_admin_reset_password:
+                if len(settings.bootstrap_admin_reset_password) < 12:
+                    raise RuntimeError(
+                        "BOOTSTRAP_ADMIN_RESET_PASSWORD doit contenir au moins 12 caractères."
+                    )
+                user.password_hash = hash_password(
+                    settings.bootstrap_admin_reset_password
+                )
+                user.role = "owner"
+                user.is_active = True
+                db.execute(delete(UserSession).where(UserSession.user_id == user.id))
+                record_audit(
+                    db,
+                    organization,
+                    "system:render-password-reset",
+                    "system",
+                    "auth.bootstrap_owner_recovered",
+                    "user",
+                    user.id,
                 )
             elif settings.bootstrap_admin_force_sync:
                 password_was_explicitly_managed = db.scalar(
