@@ -11,9 +11,11 @@ os.environ["BOOTSTRAP_ORGANIZATION_NAME"] = "PME Test"
 os.environ["BOOTSTRAP_ORGANIZATION_SLUG"] = "pme-test"
 os.environ["BOOTSTRAP_ADMIN_EMAIL"] = "owner@example.test"
 os.environ["BOOTSTRAP_ADMIN_PASSWORD"] = "Test-password-very-strong-2026"
+os.environ["BOOTSTRAP_ADMIN_FORCE_SYNC"] = "true"
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from app.auth import hash_password
 from app.database import Base, SessionLocal, engine
@@ -73,6 +75,34 @@ def test_owner_login_session_and_logout(client: TestClient):
     assert profile.json()["theme"] == "dark"
     assert client.post("/api/v1/auth/logout", headers=headers).status_code == 204
     assert client.get("/api/v1/auth/me", headers=headers).status_code == 401
+
+
+def test_bootstrap_owner_is_recovered_when_force_sync_is_enabled():
+    with TestClient(app):
+        pass
+
+    with SessionLocal() as db:
+        owner = db.scalar(select(User).where(User.email == "owner@example.test"))
+        owner.password_hash = hash_password("Obsolete-password-strong-2026")
+        owner.role = "viewer"
+        owner.is_active = False
+        db.commit()
+
+    with TestClient(app) as recovered_client:
+        response = recovered_client.post(
+            "/api/v1/auth/login",
+            json={
+                "organization_slug": "pme-test",
+                "email": "owner@example.test",
+                "password": "Test-password-very-strong-2026",
+            },
+        )
+        assert response.status_code == 200
+
+    with SessionLocal() as db:
+        owner = db.scalar(select(User).where(User.email == "owner@example.test"))
+        assert owner.role == "owner"
+        assert owner.is_active is True
 
 
 def test_user_theme_is_validated_persisted_and_audited(
