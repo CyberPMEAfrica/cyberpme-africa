@@ -1,4 +1,5 @@
 import { useState } from "react";
+import BrandLogo from "./BrandLogo";
 
 const icons = {
   overview: <><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></>,
@@ -45,7 +46,7 @@ export default function AppShell({ activePage, onNavigate, apiOnline, isRefreshi
       <button className="mobile-menu" onClick={() => setMobileOpen(true)} aria-label="Ouvrir le menu">☰</button>
       {mobileOpen && <button className="sidebar-backdrop" onClick={() => setMobileOpen(false)} aria-label="Fermer le menu" />}
       <aside className={`sidebar ${mobileOpen ? "open" : ""}`}>
-        <div className="sidebar-brand"><b>CA</b><div><strong>CyberPME</strong><small>AFRICA</small></div></div>
+        <div className="sidebar-brand"><BrandLogo compact /></div>
         <nav aria-label="Navigation principale">
           <p>SUPERVISION</p>
           {navigation.slice(0, 8).map((item) => (

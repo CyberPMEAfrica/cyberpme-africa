@@ -1,4 +1,5 @@
 import { useState } from "react";
+import BrandLogo from "./BrandLogo";
 
 export default function LoginPage({ apiUrl, onAuthenticated }) {
   const [organization, setOrganization] = useState("cyberpme-lab");
@@ -26,7 +27,7 @@ export default function LoginPage({ apiUrl, onAuthenticated }) {
   }
 
   return <main className="login-screen"><section className="login-card">
-    <div className="login-brand"><b>CA</b><div><strong>CyberPME</strong><small>AFRICA</small></div></div>
+    <div className="login-brand"><BrandLogo /></div>
     <p className="eyebrow">ESPACE SÉCURISÉ</p><h1>Connexion</h1>
     <p>Accédez uniquement aux systèmes de votre organisation.</p>
     <form onSubmit={submit}>

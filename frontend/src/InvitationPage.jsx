@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import BrandLogo from "./BrandLogo";
 
 const roleLabels = {
   admin: "Administrateur",
@@ -62,7 +63,7 @@ export default function InvitationPage({ apiUrl, token, onAuthenticated }) {
   return (
     <main className="login-screen">
       <section className="login-card invitation-card">
-        <div className="login-brand"><b>CA</b><div><strong>CyberPME</strong><small>AFRICA</small></div></div>
+        <div className="login-brand"><BrandLogo /></div>
         <p className="eyebrow">INVITATION SÉCURISÉE</p>
         <h1>Rejoindre la PME</h1>
         {loading && !invitation && <p>Vérification du lien…</p>}
