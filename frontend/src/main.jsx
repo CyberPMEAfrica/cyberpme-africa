@@ -5,6 +5,7 @@ import "./alerts.css";
 import "./scanner.css";
 import "./shell.css";
 import "./theme.css";
+import "./brand.css";
 import AppShell, { activePages } from "./AppShell";
 import NetworkScanner from "./NetworkScanner";
 import BackupsPage from "./BackupsPage";
