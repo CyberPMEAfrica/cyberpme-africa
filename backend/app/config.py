@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     bootstrap_admin_force_sync: bool = False
     bootstrap_recovery_key: str = ""
     bootstrap_admin_reset_password: str = ""
+    demo_seed_enabled: bool = False
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @field_validator("database_url", mode="before")

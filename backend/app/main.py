@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.auth import hash_password, hash_session_token, issue_session_token, verify_password
 from app.database import get_db
+from app.demo_seed import seed_demo_data
 from app.email_notifications import send_alert_email, send_invitation_email
 from app.models import AgentCredential, Alert, AuditEntry, BackupCheck, IdsConnector, Metric, NetworkScan, Organization, SecurityEvent, Server, SslCheck, User, UserInvitation, UserSession
 from app.network_scanner import run_network_scan, validate_private_target
@@ -139,6 +140,15 @@ async def lifespan(_: FastAPI):
                 user.role = "owner"
                 user.is_active = True
             db.commit()
+    if settings.demo_seed_enabled:
+        with next(get_db()) as db:
+            organization = db.scalar(
+                select(Organization).where(
+                    Organization.slug == settings.bootstrap_organization_slug
+                )
+            )
+            if organization is not None:
+                seed_demo_data(db, organization)
     yield
 
 
