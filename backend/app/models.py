@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, JSON, DateTime, Float, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
@@ -100,7 +100,7 @@ class BackupCheck(Base):
     source: Mapped[str] = mapped_column(String(500))
     status: Mapped[str] = mapped_column(String(20), index=True)
     exists: Mapped[bool]
-    size_bytes: Mapped[int | None]
+    size_bytes: Mapped[int | None] = mapped_column(BigInteger)
     last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     max_age_hours: Mapped[int]
     error: Mapped[str | None] = mapped_column(Text)

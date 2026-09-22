@@ -49,13 +49,18 @@ def test_migration_creates_a_fresh_schema_and_is_idempotent(tmp_path):
     with engine.connect() as connection:
         assert connection.exec_driver_sql(
             "SELECT version_num FROM alembic_version"
-        ).scalar_one() == "20260729_0003"
+        ).scalar_one() == "20260922_0004"
     assert {column["name"] for column in inspector.get_columns("users")} >= {"theme"}
     assert {
         "previous_token_hash",
         "previous_token_expires_at",
         "token_rotated_at",
     }.issubset({column["name"] for column in inspector.get_columns("ids_connectors")})
+    backup_size = next(
+        column for column in inspector.get_columns("backup_checks")
+        if column["name"] == "size_bytes"
+    )
+    assert str(backup_size["type"]).upper() == "BIGINT"
     engine.dispose()
 
 
@@ -108,5 +113,5 @@ def test_migration_adopts_existing_schema_without_losing_data(tmp_path):
     with engine.connect() as connection:
         assert connection.exec_driver_sql(
             "SELECT version_num FROM alembic_version"
-        ).scalar_one() == "20260729_0003"
+        ).scalar_one() == "20260922_0004"
     engine.dispose()
