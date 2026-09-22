@@ -6,7 +6,6 @@ from uuid import UUID, uuid4
 
 os.environ["DATABASE_URL"] = "sqlite:///./cyberpme_test.db"
 os.environ["AGENT_ENROLLMENT_KEY"] = "ci-enrollment-secret"
-os.environ["NETWORK_SCAN_KEY"] = "ci-network-scan-secret"
 os.environ["BOOTSTRAP_ORGANIZATION_NAME"] = "PME Test"
 os.environ["BOOTSTRAP_ORGANIZATION_SLUG"] = "pme-test"
 os.environ["BOOTSTRAP_ADMIN_EMAIL"] = "owner@example.test"
@@ -680,19 +679,18 @@ def test_server_metrics_and_alert_lifecycle(client: TestClient, user_headers: di
     assert all(alert["status"] == "resolved" for alert in history)
 
 
-def test_network_scan_requires_key_and_private_limited_target(client: TestClient, monkeypatch, user_headers: dict[str, str]):
+def test_network_scan_uses_session_and_private_limited_target(client: TestClient, monkeypatch, user_headers: dict[str, str]):
     unauthorized = client.post("/api/v1/network-scans", json={"target": "192.168.1.0/24"})
     assert unauthorized.status_code == 401
 
-    headers = {"X-Scan-Key": "ci-network-scan-secret"}
-    public_target = client.post("/api/v1/network-scans", json={"target": "8.8.8.0/24"}, headers=headers)
+    public_target = client.post("/api/v1/network-scans", json={"target": "8.8.8.0/24"}, headers=user_headers)
     assert public_target.status_code == 422
 
-    large_target = client.post("/api/v1/network-scans", json={"target": "10.0.0.0/16"}, headers=headers)
+    large_target = client.post("/api/v1/network-scans", json={"target": "10.0.0.0/16"}, headers=user_headers)
     assert large_target.status_code == 422
 
     monkeypatch.setattr("app.main.run_network_scan", lambda _: None)
-    accepted = client.post("/api/v1/network-scans", json={"target": "192.168.1.0/24"}, headers=headers)
+    accepted = client.post("/api/v1/network-scans", json={"target": "192.168.1.0/24"}, headers=user_headers)
     assert accepted.status_code == 202
     assert accepted.json()["target"] == "192.168.1.0/24"
     assert accepted.json()["status"] == "pending"
@@ -700,12 +698,13 @@ def test_network_scan_requires_key_and_private_limited_target(client: TestClient
     history = client.get("/api/v1/network-scans", headers=user_headers)
     assert history.status_code == 200
     assert len(history.json()) == 1
+    audit_entries = client.get("/api/v1/audit-entries", headers=user_headers).json()
+    assert any(entry["action"] == "network_scan.started" for entry in audit_entries)
 
 
-def test_ssl_check_requires_key_and_records_result(client: TestClient, monkeypatch, user_headers: dict[str, str]):
+def test_ssl_check_uses_session_and_records_result(client: TestClient, monkeypatch, user_headers: dict[str, str]):
     unauthorized = client.post("/api/v1/ssl-checks", json={"hostname": "example.com", "port": 443})
     assert unauthorized.status_code == 401
-    headers = {"X-Scan-Key": "ci-network-scan-secret"}
     monkeypatch.setattr("app.main.validate_public_hostname", lambda hostname, port: ("example.com", ["93.184.216.34"]))
     now = datetime.now(timezone.utc)
     monkeypatch.setattr(
@@ -717,11 +716,31 @@ def test_ssl_check_requires_key_and_records_result(client: TestClient, monkeypat
             "cipher": "TLS_AES_256_GCM_SHA384", "error": None,
         },
     )
-    response = client.post("/api/v1/ssl-checks", json={"hostname": "example.com", "port": 443}, headers=headers)
+    response = client.post("/api/v1/ssl-checks", json={"hostname": "example.com", "port": 443}, headers=user_headers)
     assert response.status_code == 201
     assert response.json()["status"] == "valid"
     assert response.json()["days_remaining"] == 59
     assert len(client.get("/api/v1/ssl-checks", headers=user_headers).json()) == 1
+    audit_entries = client.get("/api/v1/audit-entries", headers=user_headers).json()
+    assert any(entry["action"] == "ssl_check.completed" for entry in audit_entries)
+
+
+def test_viewer_cannot_start_network_or_ssl_audits(client: TestClient, user_headers: dict[str, str]):
+    with SessionLocal() as db:
+        owner = db.scalar(select(User).where(User.email == "owner@example.test"))
+        owner.role = "viewer"
+        db.commit()
+
+    assert client.post(
+        "/api/v1/network-scans",
+        json={"target": "192.168.1.0/24"},
+        headers=user_headers,
+    ).status_code == 403
+    assert client.post(
+        "/api/v1/ssl-checks",
+        json={"hostname": "example.com", "port": 443},
+        headers=user_headers,
+    ).status_code == 403
 
 
 def test_backup_checks_require_agent_and_evaluate_freshness(client: TestClient, user_headers: dict[str, str]):

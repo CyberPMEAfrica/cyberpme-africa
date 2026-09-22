@@ -29,13 +29,11 @@ Le dashboard intègre un scanner réseau pour les infrastructures administrées 
 - recommandations de sécurité ;
 - historique PostgreSQL et rapport PDF téléchargeable.
 
-Ajoutez une clé différente de la clé d'enrôlement dans `.env` :
-
-```env
-NETWORK_SCAN_KEY=une-longue-cle-secrete-differente
-```
-
-Le lancement d'un audit exige cette clé et une confirmation explicite d'autorisation dans le dashboard. N'analysez jamais un réseau sans l'accord de son propriétaire.
+Le lancement utilise directement la session CyberPME. Les rôles propriétaire,
+administrateur et analyste peuvent démarrer un audit après avoir confirmé leur
+autorisation ; le rôle lecture seule peut seulement consulter les résultats.
+Chaque lancement est inscrit dans le journal d'audit. N'analysez jamais un
+réseau sans l'accord de son propriétaire.
 
 ## Surveillance SSL/TLS
 
@@ -48,7 +46,9 @@ Le dashboard permet également de vérifier les certificats des domaines publics
 - état valide, expiration proche, expiré ou non fiable ;
 - historique des contrôles dans PostgreSQL.
 
-Par sécurité, le contrôle refuse les adresses IP, les résolutions privées et les ports autres que `443` et `8443`. Le lancement utilise la même clé locale `NETWORK_SCAN_KEY` que les autres audits de sécurité.
+Par sécurité, le contrôle refuse les adresses IP, les résolutions privées et
+les ports autres que `443` et `8443`. Il utilise la session CyberPME, applique
+les permissions de rôle et inscrit chaque vérification dans le journal d'audit.
 
 ## Agent de monitoring
 

@@ -189,8 +189,8 @@ function App() {
   let page;
   if (activePage === "servers") page = <ServersPage servers={servers} error={error}/>;
   else if (activePage === "alerts") page = <AlertsPage alerts={alerts}/>;
-  else if (activePage === "scanner") page = <NetworkScanner apiUrl={API_URL} token={sessionToken} scans={networkScans} onCreated={loadData}/>;
-  else if (activePage === "ssl") page = <SslMonitor apiUrl={API_URL} token={sessionToken} checks={sslChecks} onCreated={loadData}/>;
+  else if (activePage === "scanner") page = <NetworkScanner apiUrl={API_URL} token={sessionToken} scans={networkScans} currentUser={currentUser} onCreated={loadData}/>;
+  else if (activePage === "ssl") page = <SslMonitor apiUrl={API_URL} token={sessionToken} checks={sslChecks} currentUser={currentUser} onCreated={loadData}/>;
   else if (activePage === "reports") page = <ReportsPage apiUrl={API_URL} token={sessionToken} scans={networkScans}/>;
   else if (activePage === "backups") page = <BackupsPage checks={backupChecks}/>;
   else if (activePage === "ids") page = <SecurityEventsPage apiUrl={API_URL} token={sessionToken} events={securityEvents} connectors={idsConnectors} servers={servers} currentUser={currentUser} onCreated={loadData}/>;

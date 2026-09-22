@@ -5,7 +5,6 @@ def settings_for(database_url: str) -> Settings:
     return Settings(
         database_url=database_url,
         agent_enrollment_key="test-enrollment-key",
-        network_scan_key="test-network-scan-key",
     )
 
 
