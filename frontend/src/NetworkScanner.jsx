@@ -14,6 +14,13 @@ export default function NetworkScanner({ apiUrl, token, scans, currentUser, onCr
   const [message, setMessage] = useState("");
   const latest = scans[0];
   const canRunScan = ["owner", "admin", "analyst"].includes(currentUser.role);
+  const hosts = Array.isArray(latest?.results)
+    ? latest.results.map((host) => ({
+        ...host,
+        ports: Array.isArray(host?.ports) ? host.ports : [],
+        recommendations: Array.isArray(host?.recommendations) ? host.recommendations : [],
+      }))
+    : [];
 
   async function startScan(event) {
     event.preventDefault();
@@ -93,9 +100,9 @@ export default function NetworkScanner({ apiUrl, token, scans, currentUser, onCr
                 </button>
               )}
               {latest.error && <p className="error">{latest.error}</p>}
-              {latest.status === "completed" && !latest.results.length && <p className="scan-note">Aucun équipement actif détecté.</p>}
+              {latest.status === "completed" && !hosts.length && <p className="scan-note">Aucun équipement actif détecté.</p>}
               <div className="scan-hosts">
-                {latest.results.map((host) => (
+                {hosts.map((host) => (
                   <article className="scan-host" key={host.ip_address}>
                     <div><h3>{host.hostname || host.ip_address}</h3>{host.hostname && <small>{host.ip_address}</small>}</div>
                     {!host.ports.length ? <p>Aucun port courant ouvert.</p> : (
