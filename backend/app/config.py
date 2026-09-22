@@ -15,7 +15,6 @@ class Settings(BaseSettings):
     frontend_public_url: str = "http://localhost:5173"
     cors_origins: str = "http://localhost:5173"
     agent_enrollment_key: str
-    network_scan_key: str
     bootstrap_organization_name: str = "CyberPME Lab"
     bootstrap_organization_slug: str = "cyberpme-lab"
     bootstrap_admin_email: str = ""

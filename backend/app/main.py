@@ -75,7 +75,6 @@ async def lifespan(_: FastAPI):
             db.add(organization)
             db.flush()
         organization.enrollment_key_hash = token_hash(settings.agent_enrollment_key)
-        organization.scan_key_hash = token_hash(settings.network_scan_key)
         db.commit()
     if settings.bootstrap_admin_email and settings.bootstrap_admin_password:
         with next(get_db()) as db:
@@ -964,22 +963,15 @@ def list_alerts(
     return [AlertRead.model_validate(alert).model_copy(update={"server_name": alert.server.name}) for alert in alerts]
 
 
-def require_scan_key(db: Session, x_scan_key: str | None) -> Organization:
-    supplied_hash = token_hash(x_scan_key or "")
-    organization = db.scalar(select(Organization).where(Organization.scan_key_hash == supplied_hash))
-    if organization is None or not x_scan_key or not hmac.compare_digest(supplied_hash, organization.scan_key_hash or ""):
-        raise HTTPException(status_code=401, detail="Clé d’audit réseau invalide.")
-    return organization
-
-
 @app.post("/api/v1/network-scans", response_model=NetworkScanRead, status_code=status.HTTP_202_ACCEPTED)
 def create_network_scan(
     payload: NetworkScanCreate,
     background_tasks: BackgroundTasks,
-    x_scan_key: str | None = Header(default=None),
+    context: tuple[User, Organization] = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> NetworkScan:
-    organization = require_scan_key(db, x_scan_key)
+    user, organization = context
+    require_role(user, "owner", "admin", "analyst")
     try:
         target = validate_private_target(payload.target)
     except ValueError as exc:
@@ -994,6 +986,17 @@ def create_network_scan(
         raise HTTPException(status_code=409, detail="Un audit réseau est déjà en cours.")
     scan = NetworkScan(organization_id=organization.id, target=target)
     db.add(scan)
+    db.flush()
+    record_audit(
+        db,
+        organization,
+        user.email,
+        user.role,
+        "network_scan.started",
+        "network_scan",
+        scan.id,
+        {"target": target},
+    )
     db.commit()
     db.refresh(scan)
     background_tasks.add_task(run_network_scan, scan.id)
@@ -1055,10 +1058,11 @@ def get_network_scan_report(
 @app.post("/api/v1/ssl-checks", response_model=SslCheckRead, status_code=status.HTTP_201_CREATED)
 def create_ssl_check(
     payload: SslCheckCreate,
-    x_scan_key: str | None = Header(default=None),
+    context: tuple[User, Organization] = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> SslCheck:
-    organization = require_scan_key(db, x_scan_key)
+    user, organization = context
+    require_role(user, "owner", "admin", "analyst")
     try:
         hostname, _ = validate_public_hostname(payload.hostname, payload.port)
     except ValueError as exc:
@@ -1080,6 +1084,17 @@ def create_ssl_check(
         }
     check = SslCheck(organization_id=organization.id, hostname=hostname, port=payload.port, **result)
     db.add(check)
+    db.flush()
+    record_audit(
+        db,
+        organization,
+        user.email,
+        user.role,
+        "ssl_check.completed",
+        "ssl_check",
+        check.id,
+        {"hostname": hostname, "port": payload.port, "status": result["status"]},
+    )
     db.commit()
     db.refresh(check)
     return check

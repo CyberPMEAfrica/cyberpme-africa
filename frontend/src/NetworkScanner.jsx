@@ -7,13 +7,13 @@ const statusLabels = {
   failed: "Échec",
 };
 
-export default function NetworkScanner({ apiUrl, token, scans, onCreated }) {
+export default function NetworkScanner({ apiUrl, token, scans, currentUser, onCreated }) {
   const [target, setTarget] = useState("192.168.1.0/24");
-  const [scanKey, setScanKey] = useState("");
   const [authorized, setAuthorized] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
   const latest = scans[0];
+  const canRunScan = ["owner", "admin", "analyst"].includes(currentUser.role);
 
   async function startScan(event) {
     event.preventDefault();
@@ -26,7 +26,7 @@ export default function NetworkScanner({ apiUrl, token, scans, onCreated }) {
     try {
       const response = await fetch(`${apiUrl}/api/v1/network-scans`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-Scan-Key": scanKey, Authorization: `Bearer ${token}` },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ target }),
       });
       const data = await response.json();
@@ -67,15 +67,12 @@ export default function NetworkScanner({ apiUrl, token, scans, onCreated }) {
             Réseau à auditer
             <input value={target} onChange={(event) => setTarget(event.target.value)} placeholder="192.168.1.0/24" required />
           </label>
-          <label>
-            Clé d’audit
-            <input type="password" value={scanKey} onChange={(event) => setScanKey(event.target.value)} required autoComplete="off" />
-          </label>
           <label className="authorization">
             <input type="checkbox" checked={authorized} onChange={(event) => setAuthorized(event.target.checked)} />
             <span>Je confirme être autorisé à analyser ce réseau.</span>
           </label>
-          <button type="submit" disabled={submitting || latest?.status === "pending" || latest?.status === "running"}>
+          {!canRunScan && <p className="scan-message">Votre rôle dispose d’un accès en lecture seule.</p>}
+          <button type="submit" disabled={submitting || !canRunScan || latest?.status === "pending" || latest?.status === "running"}>
             {submitting ? "Démarrage..." : "Lancer l’audit"}
           </button>
           {message && <p className="scan-message" role="status">{message}</p>}

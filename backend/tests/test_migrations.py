@@ -3,7 +3,6 @@ from pathlib import Path
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///./cyberpme_test.db")
 os.environ.setdefault("AGENT_ENROLLMENT_KEY", "ci-enrollment-secret")
-os.environ.setdefault("NETWORK_SCAN_KEY", "ci-network-scan-secret")
 
 from alembic import command
 from alembic.config import Config

@@ -13,8 +13,6 @@ services:
           property: connectionString
       - key: AGENT_ENROLLMENT_KEY
         generateValue: true
-      - key: NETWORK_SCAN_KEY
-        generateValue: true
       - key: BOOTSTRAP_ORGANIZATION_NAME
         value: CyberPME Démonstration
       - key: BOOTSTRAP_ORGANIZATION_SLUG

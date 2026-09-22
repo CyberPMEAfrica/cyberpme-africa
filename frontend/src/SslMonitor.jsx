@@ -12,12 +12,12 @@ function formatDate(value) {
   return value ? new Intl.DateTimeFormat("fr-FR", { dateStyle: "medium" }).format(new Date(value)) : "—";
 }
 
-export default function SslMonitor({ apiUrl, token, checks, onCreated }) {
+export default function SslMonitor({ apiUrl, token, checks, currentUser, onCreated }) {
   const [hostname, setHostname] = useState("");
   const [port, setPort] = useState("443");
-  const [scanKey, setScanKey] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
+  const canRunCheck = ["owner", "admin", "analyst"].includes(currentUser.role);
 
   async function runCheck(event) {
     event.preventDefault();
@@ -26,7 +26,7 @@ export default function SslMonitor({ apiUrl, token, checks, onCreated }) {
     try {
       const response = await fetch(`${apiUrl}/api/v1/ssl-checks`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-Scan-Key": scanKey, Authorization: `Bearer ${token}` },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ hostname, port: Number(port) }),
       });
       const data = await response.json();
@@ -52,7 +52,7 @@ export default function SslMonitor({ apiUrl, token, checks, onCreated }) {
           <p>Contrôle la confiance, l’expiration et les paramètres TLS du certificat présenté.</p>
           <label>
             Nom de domaine
-            <input value={hostname} onChange={(event) => setHostname(event.target.value)} placeholder="example.com" required />
+            <input value={hostname} onChange={(event) => setHostname(event.target.value)} placeholder="cyberpme-demo.vercel.app" required />
           </label>
           <label>
             Port TLS
@@ -61,11 +61,8 @@ export default function SslMonitor({ apiUrl, token, checks, onCreated }) {
               <option value="8443">8443</option>
             </select>
           </label>
-          <label>
-            Clé d’audit
-            <input type="password" value={scanKey} onChange={(event) => setScanKey(event.target.value)} required autoComplete="off" />
-          </label>
-          <button type="submit" disabled={submitting}>{submitting ? "Vérification..." : "Vérifier le certificat"}</button>
+          {!canRunCheck && <p className="ssl-message">Votre rôle dispose d’un accès en lecture seule.</p>}
+          <button type="submit" disabled={submitting || !canRunCheck}>{submitting ? "Vérification..." : "Vérifier le certificat"}</button>
           {message && <p className="ssl-message" role="status">{message}</p>}
         </form>
 
