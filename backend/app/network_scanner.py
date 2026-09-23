@@ -36,7 +36,7 @@ def validate_private_target(value: str) -> str:
         raise ValueError("Saisissez un réseau IPv4 valide, par exemple 192.168.1.0/24.") from exc
     if not isinstance(network, IPv4Network):
         raise ValueError("Seuls les réseaux IPv4 privés sont acceptés pour le moment.")
-    if not network.is_private:
+    if not any(network.subnet_of(IPv4Network(cidr)) for cidr in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")):
         raise ValueError("La cible doit être un réseau IPv4 privé.")
     if network.prefixlen < 24:
         raise ValueError("Un audit est limité à un réseau /24 ou plus petit.")

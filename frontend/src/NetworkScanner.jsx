@@ -1,4 +1,5 @@
 import { useState } from "react";
+import AgentSetup from "./AgentSetup";
 
 const statusLabels = {
   pending: "En attente",
@@ -7,7 +8,11 @@ const statusLabels = {
   failed: "Échec",
 };
 
-export default function NetworkScanner({ apiUrl, token, scans, currentUser, onCreated }) {
+export default function NetworkScanner({ apiUrl, token, scans, servers = [], currentUser, onCreated }) {
+  const [selectedAgent, setSelectedAgent] = useState("");
+  const connectedAgents = servers.filter((server) => server.agent_connected);
+  const agentId = selectedAgent || connectedAgents[0]?.id || "";
+  const agentAvailable = connectedAgents.some((agent) => agent.id === agentId);
   const [target, setTarget] = useState("192.168.1.0/24");
   const [authorized, setAuthorized] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -34,11 +39,11 @@ export default function NetworkScanner({ apiUrl, token, scans, currentUser, onCr
       const response = await fetch(`${apiUrl}/api/v1/network-scans`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ target }),
+        body: JSON.stringify({ target, agent_server_id: agentId }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "Impossible de démarrer l’audit.");
-      setMessage("Audit démarré. Les résultats seront actualisés automatiquement.");
+      setMessage("Audit transmis à votre PC. Le démarrage peut prendre 30 secondes, puis l’analyse quelques minutes.");
       await onCreated();
     } catch (error) {
       setMessage(error.message);
@@ -70,6 +75,13 @@ export default function NetworkScanner({ apiUrl, token, scans, currentUser, onCr
         <form className="scan-form" onSubmit={startScan}>
           <h3>Nouvel audit autorisé</h3>
           <p>Découvre les équipements et identifie les 100 ports TCP les plus courants.</p>
+          <label>PC chargé de l’audit
+            <select value={agentId} onChange={(event) => setSelectedAgent(event.target.value)} required>
+              {!agentAvailable && <option value="">Aucun agent connecté</option>}
+              {connectedAgents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name} · {agent.ip_address || agent.hostname}</option>)}
+            </select>
+          </label>
+          {!connectedAgents.length && <p>Connectez un PC Windows à l’aide du guide ci-dessous pour analyser son réseau local.</p>}
           <label>
             Réseau à auditer
             <input value={target} onChange={(event) => setTarget(event.target.value)} placeholder="192.168.1.0/24" required />
@@ -79,10 +91,11 @@ export default function NetworkScanner({ apiUrl, token, scans, currentUser, onCr
             <span>Je confirme être autorisé à analyser ce réseau.</span>
           </label>
           {!canRunScan && <p className="scan-message">Votre rôle dispose d’un accès en lecture seule.</p>}
-          <button type="submit" disabled={submitting || !canRunScan || latest?.status === "pending" || latest?.status === "running"}>
+          <button type="submit" disabled={submitting || !canRunScan || !agentAvailable || latest?.status === "pending" || latest?.status === "running"}>
             {submitting ? "Démarrage..." : "Lancer l’audit"}
           </button>
           {message && <p className="scan-message" role="status">{message}</p>}
+          <AgentSetup apiUrl={apiUrl} token={token} currentUser={currentUser} />
         </form>
 
         <div className="scan-results">

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cyberpme-agent"
-version = "0.1.0"
-description = "Agent léger de supervision CyberPME Africa"
+version = "0.2.0"
+description = "Agent local de supervision et d’audit réseau CyberPME Africa"
 requires-python = ">=3.10"
 dependencies = ["psutil>=6.1,<8.0"]
 

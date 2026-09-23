@@ -6,10 +6,10 @@ import secrets
 import ssl
 from urllib.parse import quote
 from uuid import UUID
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.config import settings
@@ -17,12 +17,13 @@ from app.auth import hash_password, hash_session_token, issue_session_token, ver
 from app.database import get_db
 from app.demo_seed import seed_demo_data
 from app.email_notifications import send_alert_email, send_invitation_email
-from app.models import AgentCredential, Alert, AuditEntry, BackupCheck, IdsConnector, Metric, NetworkScan, Organization, SecurityEvent, Server, SslCheck, User, UserInvitation, UserSession
-from app.network_scanner import run_network_scan, validate_private_target
+from app.models import AgentCredential, AgentEnrollmentToken, Alert, AuditEntry, BackupCheck, IdsConnector, Metric, NetworkScan, Organization, SecurityEvent, Server, SslCheck, User, UserInvitation, UserSession
+from app.network_scanner import validate_private_target
 from app.network_report import build_network_scan_pdf
 from app.schemas import (
     AgentRegistration,
     AgentRegistrationRead,
+    AgentEnrollmentCreated,
     AlertRead,
     AuditEntryRead,
     BackupCheckCreate,
@@ -41,6 +42,8 @@ from app.schemas import (
     MetricCreate,
     MetricRead,
     NetworkScanCreate,
+    NetworkScanJobRead,
+    NetworkScanJobResult,
     NetworkScanRead,
     SecurityEventCreate,
     SecurityEventRead,
@@ -191,7 +194,19 @@ def require_user(
 def server_response(db: Session, server: Server) -> ServerRead:
     latest = db.scalar(select(Metric).where(Metric.server_id == server.id).order_by(Metric.collected_at.desc()).limit(1))
     data = ServerRead.model_validate(server)
-    return data.model_copy(update={"latest_metric": MetricRead.model_validate(latest) if latest else None})
+    last_seen = server.last_seen_at
+    if last_seen is not None and last_seen.tzinfo is None:
+        last_seen = last_seen.replace(tzinfo=timezone.utc)
+    connected = bool(
+        server.credential
+        and server.network_scan_capable
+        and last_seen
+        and last_seen >= datetime.now(timezone.utc) - timedelta(minutes=5)
+    )
+    return data.model_copy(update={
+        "latest_metric": MetricRead.model_validate(latest) if latest else None,
+        "agent_connected": connected,
+    })
 
 
 def token_hash(token: str) -> str:
@@ -891,12 +906,73 @@ def list_servers(
     return [server_response(db, server) for server in servers]
 
 
+@app.post("/api/v1/agent-enrollment-tokens", response_model=AgentEnrollmentCreated, status_code=status.HTTP_201_CREATED)
+def create_agent_enrollment_token(
+    context: tuple[User, Organization] = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> AgentEnrollmentCreated:
+    user, organization = context
+    require_role(user, "owner", "admin")
+    now = datetime.now(timezone.utc)
+    raw_token = secrets.token_urlsafe(32)
+    enrollment = AgentEnrollmentToken(
+        organization_id=organization.id,
+        token_hash=token_hash(raw_token),
+        created_by_email=user.email,
+        expires_at=now + timedelta(minutes=15),
+    )
+    db.add(enrollment)
+    db.flush()
+    record_audit(
+        db,
+        organization,
+        user.email,
+        user.role,
+        "agent.enrollment_created",
+        "agent_enrollment",
+        enrollment.id,
+        {"expires_at": enrollment.expires_at.isoformat()},
+    )
+    db.commit()
+    return AgentEnrollmentCreated(enrollment_token=raw_token, expires_at=enrollment.expires_at)
+
+
 @app.post("/api/v1/agents/register", response_model=AgentRegistrationRead)
-def register_agent(payload: AgentRegistration, x_enrollment_key: str | None = Header(default=None), db: Session = Depends(get_db)) -> AgentRegistrationRead:
-    supplied_hash = token_hash(x_enrollment_key or "")
-    organization = db.scalar(select(Organization).where(Organization.enrollment_key_hash == supplied_hash))
-    if organization is None or not x_enrollment_key or not hmac.compare_digest(supplied_hash, organization.enrollment_key_hash or ""):
-        raise HTTPException(status_code=401, detail="Clé d’enrôlement invalide.")
+def register_agent(
+    payload: AgentRegistration,
+    x_enrollment_key: str | None = Header(default=None),
+    x_enrollment_token: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+) -> AgentRegistrationRead:
+    organization = None
+    enrollment = None
+    if x_enrollment_token:
+        supplied_hash = token_hash(x_enrollment_token)
+        enrollment = db.scalar(select(AgentEnrollmentToken).where(AgentEnrollmentToken.token_hash == supplied_hash))
+        if enrollment is not None:
+            expires_at = enrollment.expires_at
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            if enrollment.used_at is not None or expires_at <= datetime.now(timezone.utc):
+                enrollment = None
+        if enrollment is not None and hmac.compare_digest(supplied_hash, enrollment.token_hash):
+            organization = db.get(Organization, enrollment.organization_id)
+    elif x_enrollment_key:
+        supplied_hash = token_hash(x_enrollment_key)
+        organization = db.scalar(select(Organization).where(Organization.enrollment_key_hash == supplied_hash))
+        if organization is not None and not hmac.compare_digest(supplied_hash, organization.enrollment_key_hash or ""):
+            organization = None
+    if organization is None:
+        raise HTTPException(status_code=401, detail="Jeton d’installation invalide ou expiré.")
+    if enrollment is not None:
+        consumed = db.execute(update(AgentEnrollmentToken).where(
+            AgentEnrollmentToken.id == enrollment.id,
+            AgentEnrollmentToken.used_at.is_(None),
+            AgentEnrollmentToken.expires_at > datetime.now(timezone.utc),
+        ).values(used_at=datetime.now(timezone.utc)).execution_options(synchronize_session="fetch"))
+        if consumed.rowcount != 1:
+            db.rollback()
+            raise HTTPException(status_code=401, detail="Jeton d’installation déjà utilisé ou expiré.")
     server = db.scalar(
         select(Server).where(Server.organization_id == organization.id, Server.hostname == payload.hostname)
     )
@@ -907,12 +983,17 @@ def register_agent(payload: AgentRegistration, x_enrollment_key: str | None = He
     else:
         server.name = payload.name
         server.ip_address = payload.ip_address
+        server.network_scan_capable = payload.network_scan_capable
+    server.last_seen_at = datetime.now(timezone.utc)
+    server.status = "online"
     raw_token = secrets.token_urlsafe(32)
     if server.credential is None:
         server.credential = AgentCredential(token_hash=token_hash(raw_token))
     else:
         server.credential.token_hash = token_hash(raw_token)
         server.credential.created_at = datetime.now(timezone.utc)
+    if enrollment is not None:
+        enrollment.used_at = datetime.now(timezone.utc)
     db.commit()
     return AgentRegistrationRead(server_id=server.id, agent_token=raw_token)
 
@@ -966,7 +1047,6 @@ def list_alerts(
 @app.post("/api/v1/network-scans", response_model=NetworkScanRead, status_code=status.HTTP_202_ACCEPTED)
 def create_network_scan(
     payload: NetworkScanCreate,
-    background_tasks: BackgroundTasks,
     context: tuple[User, Organization] = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> NetworkScan:
@@ -976,6 +1056,8 @@ def create_network_scan(
         target = validate_private_target(payload.target)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    db.scalar(select(Organization).where(Organization.id == organization.id).with_for_update())
+    expire_network_scan_jobs(db, organization.id)
     active_scan = db.scalar(
         select(NetworkScan).where(
             NetworkScan.organization_id == organization.id,
@@ -984,7 +1066,22 @@ def create_network_scan(
     )
     if active_scan is not None:
         raise HTTPException(status_code=409, detail="Un audit réseau est déjà en cours.")
-    scan = NetworkScan(organization_id=organization.id, target=target)
+    freshness = datetime.now(timezone.utc) - timedelta(minutes=5)
+    agent_query = select(Server).join(AgentCredential).where(
+        Server.organization_id == organization.id,
+        Server.network_scan_capable.is_(True),
+        Server.last_seen_at.is_not(None),
+        Server.last_seen_at >= freshness,
+    )
+    if payload.agent_server_id:
+        agent_query = agent_query.where(Server.id == payload.agent_server_id)
+    agent = db.scalar(agent_query.order_by(Server.last_seen_at.desc()).limit(1))
+    if agent is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Aucun agent CyberPME connecté. Installez ou démarrez l’agent Windows avant de lancer l’audit.",
+        )
+    scan = NetworkScan(organization_id=organization.id, agent_server_id=agent.id, target=target)
     db.add(scan)
     db.flush()
     record_audit(
@@ -995,11 +1092,103 @@ def create_network_scan(
         "network_scan.started",
         "network_scan",
         scan.id,
-        {"target": target},
+        {"target": target, "agent_server_id": str(agent.id)},
     )
     db.commit()
     db.refresh(scan)
-    background_tasks.add_task(run_network_scan, scan.id)
+    return scan
+
+
+def expire_network_scan_jobs(db: Session, organization_id: UUID) -> None:
+    now = datetime.now(timezone.utc)
+    db.execute(update(NetworkScan).where(
+        NetworkScan.organization_id == organization_id,
+        NetworkScan.status.in_(("pending", "running")),
+        NetworkScan.requested_at < now - timedelta(minutes=10),
+    ).values(status="failed", completed_at=now, error="L’agent n’a pas terminé l’audit dans les 10 minutes. Vérifiez sa connexion puis relancez.").execution_options(synchronize_session="fetch"))
+
+
+@app.get(
+    "/api/v1/servers/{server_id}/network-scan-jobs/next",
+    response_model=NetworkScanJobRead,
+    responses={204: {"description": "Aucun audit en attente"}},
+)
+def claim_network_scan_job(
+    server_id: UUID,
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+) -> NetworkScanJobRead | Response:
+    server = db.get(Server, server_id)
+    if server is None:
+        raise HTTPException(status_code=404, detail="Agent introuvable.")
+    require_agent(server, authorization)
+    server.network_scan_capable = True
+    expire_network_scan_jobs(db, server.organization_id)
+    server.last_seen_at = datetime.now(timezone.utc)
+    scan = db.scalar(
+        select(NetworkScan)
+        .where(NetworkScan.agent_server_id == server.id, NetworkScan.status == "pending")
+        .order_by(NetworkScan.requested_at.asc())
+        .limit(1)
+    )
+    if scan is None:
+        db.commit()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    claimed = db.execute(update(NetworkScan).where(
+        NetworkScan.id == scan.id, NetworkScan.status == "pending",
+    ).values(status="running", started_at=datetime.now(timezone.utc), error=None))
+    if claimed.rowcount != 1:
+        db.commit()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    db.commit()
+    return NetworkScanJobRead(id=scan.id, target=scan.target)
+
+
+@app.post(
+    "/api/v1/servers/{server_id}/network-scan-jobs/{scan_id}/complete",
+    response_model=NetworkScanRead,
+)
+def complete_network_scan_job(
+    server_id: UUID,
+    scan_id: UUID,
+    payload: NetworkScanJobResult,
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+) -> NetworkScan:
+    server = db.get(Server, server_id)
+    if server is None:
+        raise HTTPException(status_code=404, detail="Agent introuvable.")
+    require_agent(server, authorization)
+    scan = db.scalar(
+        select(NetworkScan).where(NetworkScan.id == scan_id, NetworkScan.agent_server_id == server.id)
+    )
+    if scan is None:
+        raise HTTPException(status_code=404, detail="Audit attribué introuvable.")
+    if scan.status == payload.status:
+        return scan
+    if scan.status != "running":
+        raise HTTPException(status_code=409, detail="Cet audit est déjà terminé.")
+    scan.status = payload.status
+    scan.results = [host.model_dump(mode="json") for host in payload.results] if payload.status == "completed" else []
+    scan.error = payload.error if payload.status == "failed" else None
+    if payload.status == "failed" and not scan.error:
+        scan.error = "L’agent local n’a pas pu terminer l’audit."
+    scan.completed_at = datetime.now(timezone.utc)
+    server.last_seen_at = scan.completed_at
+    organization = db.get(Organization, server.organization_id)
+    if organization is not None:
+        record_audit(
+            db,
+            organization,
+            f"agent:{server.hostname}"[:254],
+            "agent",
+            f"network_scan.{payload.status}",
+            "network_scan",
+            scan.id,
+            {"target": scan.target, "agent_server_id": str(server.id)},
+        )
+    db.commit()
+    db.refresh(scan)
     return scan
 
 
@@ -1009,6 +1198,8 @@ def list_network_scans(
     db: Session = Depends(get_db),
 ) -> list[NetworkScan]:
     _, organization = context
+    expire_network_scan_jobs(db, organization.id)
+    db.commit()
     return list(
         db.scalars(
             select(NetworkScan)

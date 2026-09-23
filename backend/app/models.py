@@ -18,6 +18,7 @@ class Server(Base):
     hostname: Mapped[str] = mapped_column(String(255), index=True)
     ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="unknown")
+    network_scan_capable: Mapped[bool] = mapped_column(default=False, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     metrics: Mapped[list["Metric"]] = relationship(back_populates="server", cascade="all, delete-orphan")
@@ -59,10 +60,24 @@ class AgentCredential(Base):
     server: Mapped[Server] = relationship(back_populates="credential")
 
 
+class AgentEnrollmentToken(Base):
+    __tablename__ = "agent_enrollment_tokens"
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    organization_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    created_by_email: Mapped[str] = mapped_column(String(254))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class NetworkScan(Base):
     __tablename__ = "network_scans"
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     organization_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    agent_server_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("servers.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     target: Mapped[str] = mapped_column(String(64), index=True)
     status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
     results: Mapped[list[dict]] = mapped_column(JSON, default=list)
