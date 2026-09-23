@@ -1,6 +1,6 @@
 from datetime import datetime
 from uuid import UUID
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, IPvAnyAddress
 
 
 class MetricCreate(BaseModel):
@@ -28,6 +28,7 @@ class ServerRead(ServerCreate):
     created_at: datetime
     last_seen_at: datetime | None
     latest_metric: MetricRead | None = None
+    agent_connected: bool = False
 
 
 class AlertRead(BaseModel):
@@ -46,12 +47,17 @@ class AlertRead(BaseModel):
 
 
 class AgentRegistration(ServerCreate):
-    pass
+    network_scan_capable: bool = False
 
 
 class AgentRegistrationRead(BaseModel):
     server_id: UUID
     agent_token: str
+
+
+class AgentEnrollmentCreated(BaseModel):
+    enrollment_token: str
+    expires_at: datetime
 
 
 class NetworkScanCreate(BaseModel):
@@ -61,11 +67,13 @@ class NetworkScanCreate(BaseModel):
         examples=["192.168.1.0/24"],
         description="Réseau IPv4 privé autorisé, limité à 256 adresses.",
     )
+    agent_server_id: UUID | None = None
 
 
 class NetworkScanRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
+    agent_server_id: UUID | None
     target: str
     status: str
     results: list[dict]
@@ -73,6 +81,32 @@ class NetworkScanRead(BaseModel):
     requested_at: datetime
     started_at: datetime | None
     completed_at: datetime | None
+
+
+class NetworkScanJobRead(BaseModel):
+    id: UUID
+    target: str
+
+
+class NetworkScanPort(BaseModel):
+    port: int = Field(ge=1, le=65535)
+    protocol: str = Field(default="tcp", pattern="^(tcp|udp)$")
+    service: str = Field(default="inconnu", max_length=200)
+    product: str = Field(default="", max_length=300)
+    version: str = Field(default="", max_length=200)
+
+
+class NetworkScanHost(BaseModel):
+    ip_address: IPvAnyAddress
+    hostname: str | None = Field(default=None, max_length=255)
+    ports: list[NetworkScanPort] = Field(default_factory=list, max_length=100)
+    recommendations: list[str] = Field(default_factory=list, max_length=100)
+
+
+class NetworkScanJobResult(BaseModel):
+    status: str = Field(pattern="^(completed|failed)$")
+    results: list[NetworkScanHost] = Field(default_factory=list, max_length=256)
+    error: str | None = Field(default=None, max_length=2000)
 
 
 class SslCheckCreate(BaseModel):

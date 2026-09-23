@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import AgentSetup from "./AgentSetup";
 
 const roleLabels = {
   owner: "Propriétaire",
@@ -22,6 +23,10 @@ const auditActionLabels = {
   "ids_connector.revoked": "Connecteur IDS révoqué",
   "ids_connector.token_rotated": "Jeton IDS renouvelé",
   "ids_connector.previous_token_revoked": "Ancien jeton IDS révoqué",
+  "agent.enrollment_created": "Installation d’un PC préparée",
+  "network_scan.started": "Audit réseau demandé",
+  "network_scan.completed": "Audit réseau terminé",
+  "network_scan.failed": "Audit réseau interrompu",
 };
 
 const themeOptions = [
@@ -258,6 +263,7 @@ export default function SettingsPage({
     { id: "organization", label: "Organisation", meta: organization?.name || "Votre PME" },
     ...(canManageTeam ? [{ id: "team", label: "Équipe", meta: `${users.length} compte${users.length > 1 ? "s" : ""}` }] : []),
     { id: "security", label: "Sécurité", meta: "Mot de passe" },
+    { id: "agents", label: "Agents", meta: "Connecter un PC" },
     { id: "appearance", label: "Apparence", meta: activeTheme.name },
     ...(canManageTeam ? [{ id: "audit", label: "Journal", meta: `${auditEntries.length} action${auditEntries.length > 1 ? "s" : ""}` }] : []),
   ];
@@ -292,6 +298,12 @@ export default function SettingsPage({
       </nav>
 
       <div className="settings-tab-content" role="tabpanel">
+        {activeTab === "agents" && <div className="settings-tab-panel">
+          <h3>Connecter vos équipements</h3>
+          <p>Un agent local remonte les mesures du PC et exécute les audits sur son réseau.</p>
+          <AgentSetup apiUrl={apiUrl} token={token} currentUser={currentUser} />
+          <p><a href="#/scanner">Voir les agents disponibles dans Scanner réseau</a></p>
+        </div>}
         {activeTab === "organization" && (
           <div className="settings-tab-panel">
             <div className="settings-overview">

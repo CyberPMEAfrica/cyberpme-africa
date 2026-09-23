@@ -689,7 +689,8 @@ def test_network_scan_uses_session_and_private_limited_target(client: TestClient
     large_target = client.post("/api/v1/network-scans", json={"target": "10.0.0.0/16"}, headers=user_headers)
     assert large_target.status_code == 422
 
-    monkeypatch.setattr("app.main.run_network_scan", lambda _: None)
+    assert client.post("/api/v1/network-scans", json={"target": "192.168.1.0/24"}, headers=user_headers).status_code == 409
+    client.post("/api/v1/agents/register", json={"name": "PC scanner", "hostname": "scanner", "network_scan_capable": True}, headers={"X-Enrollment-Key": "ci-enrollment-secret"})
     accepted = client.post("/api/v1/network-scans", json={"target": "192.168.1.0/24"}, headers=user_headers)
     assert accepted.status_code == 202
     assert accepted.json()["target"] == "192.168.1.0/24"
@@ -723,6 +724,59 @@ def test_ssl_check_uses_session_and_records_result(client: TestClient, monkeypat
     assert len(client.get("/api/v1/ssl-checks", headers=user_headers).json()) == 1
     audit_entries = client.get("/api/v1/audit-entries", headers=user_headers).json()
     assert any(entry["action"] == "ssl_check.completed" for entry in audit_entries)
+
+
+def test_agent_pairing_and_scan_job_end_to_end(client, user_headers):
+    issued = client.post("/api/v1/agent-enrollment-tokens", headers=user_headers)
+    assert issued.status_code == 201
+    token = issued.json()["enrollment_token"]
+    payload = {"name": "PC bureau", "hostname": "bureau", "network_scan_capable": True}
+    registered = client.post("/api/v1/agents/register", json=payload, headers={"X-Enrollment-Token": token})
+    assert registered.status_code == 200
+    assert client.post("/api/v1/agents/register", json=payload, headers={"X-Enrollment-Token": token}).status_code == 401
+    agent = registered.json()
+    auth = {"Authorization": f"Bearer {agent['agent_token']}"}
+    base = f"/api/v1/servers/{agent['server_id']}/network-scan-jobs"
+    assert client.get(base + "/next").status_code == 401
+    assert client.get(base + "/next", headers=auth).status_code == 204
+    assert client.get("/api/v1/servers", headers=user_headers).json()[0]["agent_connected"] is True
+    queued = client.post("/api/v1/network-scans", headers=user_headers, json={"target": "192.168.1.0/24", "agent_server_id": agent["server_id"]})
+    assert queued.status_code == 202
+    scan = queued.json()
+    assert scan["agent_server_id"] == agent["server_id"]
+    job = client.get(base + "/next", headers=auth)
+    assert job.json()["id"] == scan["id"]
+    assert client.get(base + "/next", headers=auth).status_code == 204
+    result = {"status": "completed", "results": [{"ip_address": "192.168.1.2", "ports": [{"port": 443, "service": "https"}]}]}
+    completed = client.post(base + f"/{scan['id']}/complete", headers=auth, json=result)
+    assert completed.status_code == 200
+    assert completed.json()["results"][0]["ports"][0]["port"] == 443
+    assert client.post(base + f"/{scan['id']}/complete", headers=auth, json=result).status_code == 200
+    assert client.get(f"/api/v1/network-scans/{scan['id']}/report", headers=user_headers).status_code == 200
+    other = client.post("/api/v1/agents/register", json={"name": "Autre PC", "hostname": "other", "network_scan_capable": True}, headers={"X-Enrollment-Key": "ci-enrollment-secret"}).json()
+    assert client.post(f"/api/v1/servers/{other['server_id']}/network-scan-jobs/{scan['id']}/complete", headers={"Authorization": f"Bearer {other['agent_token']}"}, json=result).status_code == 404
+
+
+def test_pairing_expiry_role_and_offline_agents(client, user_headers):
+    from app.models import AgentEnrollmentToken, Server, NetworkScan
+    issued = client.post("/api/v1/agent-enrollment-tokens", headers=user_headers).json()
+    with SessionLocal() as db:
+        db.scalar(select(AgentEnrollmentToken)).expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        db.commit()
+    assert client.post("/api/v1/agents/register", json={"name": "PC test", "hostname": "expired"}, headers={"X-Enrollment-Token": issued["enrollment_token"]}).status_code == 401
+    agent = client.post("/api/v1/agents/register", json={"name": "PC test", "hostname": "offline", "network_scan_capable": True}, headers={"X-Enrollment-Key": "ci-enrollment-secret"}).json()
+    with SessionLocal() as db:
+        server = db.get(Server, UUID(agent["server_id"]))
+        server.last_seen_at = datetime.now(timezone.utc) - timedelta(minutes=6)
+        db.add(NetworkScan(organization_id=server.organization_id, target="192.168.1.0/24", agent_server_id=server.id, status="running", requested_at=datetime.now(timezone.utc) - timedelta(minutes=11)))
+        db.commit()
+    assert client.get("/api/v1/network-scans", headers=user_headers).json()[0]["status"] == "failed"
+    assert client.get("/api/v1/servers", headers=user_headers).json()[0]["agent_connected"] is False
+    assert client.post("/api/v1/network-scans", headers=user_headers, json={"target": "192.168.1.0/24"}).status_code == 409
+    with SessionLocal() as db:
+        db.scalar(select(User).where(User.email == "owner@example.test")).role = "viewer"
+        db.commit()
+    assert client.post("/api/v1/agent-enrollment-tokens", headers=user_headers).status_code == 403
 
 
 def test_viewer_cannot_start_network_or_ssl_audits(client: TestClient, user_headers: dict[str, str]):

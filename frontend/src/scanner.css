@@ -1,5 +1,10 @@
 .scanner { margin-top: 56px; }
 .scanner-layout { display: grid; grid-template-columns: minmax(280px, .8fr) minmax(0, 1.5fr); gap: 16px; align-items: start; }
+.agent-setup { margin-top:24px; padding-top:18px; border-top:1px solid #2b4c5d; overflow-wrap:anywhere; }
+.agent-setup summary { cursor:pointer; font-weight:700; }
+.agent-setup p,.agent-setup li { font-size:13px; line-height:1.6; }
+.agent-setup ol { padding-left:20px; }
+.agent-setup textarea { width:100%; max-width:100%; padding:12px; border-radius:8px; background:#071a28; color:#e9f2f7; border:1px solid #2b4c5d; resize:vertical; font:12px/1.5 monospace; }
 .scan-form, .scan-results { padding: 23px; background: #0b2231; border: 1px solid #1c3c4c; border-radius: 14px; }
 .scan-form h3 { margin: 0; }
 .scan-form > p { color: #91aab7; line-height: 1.5; }
