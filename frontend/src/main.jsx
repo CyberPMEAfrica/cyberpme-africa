@@ -9,6 +9,7 @@ import "./brand.css";
 import AppShell, { activePages } from "./AppShell";
 import NetworkScanner from "./NetworkScanner";
 import BackupsPage from "./BackupsPage";
+import ManagedActions from "./ManagedActions";
 import InvitationPage from "./InvitationPage";
 import LoginPage from "./LoginPage";
 import ReportsPage from "./ReportsPage";
@@ -192,8 +193,8 @@ function App() {
   else if (activePage === "scanner") page = <NetworkScanner apiUrl={API_URL} token={sessionToken} scans={networkScans} servers={servers} currentUser={currentUser} onCreated={loadData}/>;
   else if (activePage === "ssl") page = <SslMonitor apiUrl={API_URL} token={sessionToken} checks={sslChecks} currentUser={currentUser} onCreated={loadData}/>;
   else if (activePage === "reports") page = <ReportsPage apiUrl={API_URL} token={sessionToken} scans={networkScans}/>;
-  else if (activePage === "backups") page = <BackupsPage checks={backupChecks}/>;
-  else if (activePage === "ids") page = <SecurityEventsPage apiUrl={API_URL} token={sessionToken} events={securityEvents} connectors={idsConnectors} servers={servers} currentUser={currentUser} onCreated={loadData}/>;
+  else if (activePage === "backups") page = <><BackupsPage checks={backupChecks}/><ManagedActions mode="backup" apiUrl={API_URL} token={sessionToken} servers={servers} currentUser={currentUser}/></>;
+  else if (activePage === "ids") page = <><SecurityEventsPage apiUrl={API_URL} token={sessionToken} events={securityEvents} connectors={idsConnectors} servers={servers} currentUser={currentUser} onCreated={loadData}/><ManagedActions mode="firewall" apiUrl={API_URL} token={sessionToken} servers={servers} currentUser={currentUser} events={securityEvents}/></>;
   else if (activePage === "settings") page = (
     <SettingsPage
       apiUrl={API_URL}

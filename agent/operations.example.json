@@ -1,0 +1,24 @@
+{
+  "operations": {
+    "enabled": false,
+    "backup_profiles": {
+      "documents": {
+        "enabled": false,
+        "kind": "files",
+        "sources": ["/srv/documents"],
+        "repository": "sftp:backup-user@backup.example:/srv/restic/cyberpme",
+        "password_file": "/etc/cyberpme/restic-password",
+        "restore_root": "/srv/cyberpme-restore-tests",
+        "external_destination_confirmed": false,
+        "schedule_enabled": false,
+        "interval_hours": 24,
+        "retention_enabled": false,
+        "keep_last": 7
+      }
+    },
+    "firewall": {
+      "enabled": false,
+      "protected_networks": ["192.168.0.0/16", "10.0.0.0/8", "172.16.0.0/12"]
+    }
+  }
+}

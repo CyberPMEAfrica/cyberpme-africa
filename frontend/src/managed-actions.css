@@ -1,0 +1,9 @@
+.managed-actions { margin: 2rem 0; padding: 1.5rem; border: 1px solid #315466; border-radius: 18px; }
+.managed-actions form { display: grid; grid-template-columns: repeat(auto-fit,minmax(230px,1fr)); gap: 1rem; margin: 1.5rem 0; }
+.managed-actions label { display: flex; flex-direction: column; gap: .5rem; }
+.managed-actions input,.managed-actions select,.managed-actions textarea { padding: .8rem; border: 1px solid #315466; border-radius: 8px; background: var(--surface,#102835); color: inherit; max-width: 100%; }
+.managed-actions button { padding: .8rem 1rem; border-radius: 8px; cursor: pointer; }
+.managed-actions button:disabled { opacity: .5; cursor: wait; }
+.managed-history article { padding: 1rem 0; border-top: 1px solid #315466; }
+.managed-buttons { display: flex; gap: .75rem; flex-wrap: wrap; }
+.snapshot { overflow-wrap: anywhere; }

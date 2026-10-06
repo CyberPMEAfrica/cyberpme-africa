@@ -7,7 +7,7 @@ import socket
 import subprocess
 import time
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from ipaddress import IPv4Network, ip_network
 from pathlib import Path
@@ -53,6 +53,7 @@ class Config:
     enrollment_token: str = ""
     state_path: Path = default_data_dir() / "agent-state.json"
     config_path: Path | None = None
+    operations: dict = field(default_factory=dict)
 
     @classmethod
     def from_environment(cls, interval_override: int | None = None) -> "Config":
@@ -85,6 +86,7 @@ class Config:
             enrollment_token=os.getenv("CYBERPME_ENROLLMENT_TOKEN", stored.get("enrollment_token", "")),
             state_path=Path(configured_state) if configured_state else default_data_dir() / "agent-state.json",
             config_path=config_path,
+            operations=stored.get("operations", {}),
         )
 
 
@@ -284,7 +286,7 @@ def process_scan_job(config: Config, server_id: str, agent_token: str) -> bool:
 
 
 def run(config: Config, once: bool) -> None:
-    print(f"CyberPME Agent 0.2.0 — {platform.system()} {platform.release()}")
+    print(f"CyberPME Agent 0.3.0 — {platform.system()} {platform.release()}")
     print(f"Serveur: {config.name} ({config.hostname}) | API: {config.api_url}")
     credentials = load_state(config.state_path)
     if credentials is None:
@@ -293,6 +295,9 @@ def run(config: Config, once: bool) -> None:
     else:
         print(f"Identité locale chargée — identifiant {credentials[0]}")
     server_id, agent_token = credentials
+    if config.operations.get('enabled') is True and not once:
+        from cyberpme_agent.operation_worker import start_worker
+        start_worker(config, server_id, agent_token, request_json)
     backup_check_due = 0.0
     while True:
         try:
