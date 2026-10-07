@@ -64,6 +64,7 @@ from app.schemas import (
     UserUpdate,
 )
 from app.ssl_monitor import inspect_certificate, validate_public_hostname
+from app.managed_actions import install_routes as install_managed_routes
 
 
 @asynccontextmanager
@@ -1723,3 +1724,6 @@ def create_metric(
     for event, alert in alert_events:
         send_alert_email(alert, server.name, event)
     return metric
+
+
+install_managed_routes(app, require_user, require_agent, require_role, record_audit)
