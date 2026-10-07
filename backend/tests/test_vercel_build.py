@@ -1,9 +1,14 @@
 import pytest
+import importlib.util
+from pathlib import Path
 from alembic import command
 from sqlalchemy import create_engine, inspect, text
 from app.config import settings
 from test_migrations import alembic_config
-from vercel_build import main
+_spec = importlib.util.spec_from_file_location('vercel_build', Path(__file__).resolve().parents[1] / 'vercel_build.py')
+_module = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_module)
+main = _module.main
 
 
 def test_preview_never_connects(monkeypatch):
