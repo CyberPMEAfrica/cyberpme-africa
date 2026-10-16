@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import BrandLogo from "./BrandLogo";
+import InterfaceIcon from "./InterfaceIcon";
 
 const icons = {
   overview: <><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></>,
@@ -34,49 +35,125 @@ export const activePages = navigation.filter((item) => !item.upcoming).map((item
 
 export default function AppShell({ activePage, onNavigate, apiOnline, isRefreshing, lastUpdated, onRefresh, currentUser, onLogout, children }) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 780px)').matches);
+  const [refreshed, setRefreshed] = useState(false);
+  const accountRef = useRef(null);
+  const avatarRef = useRef(null);
+  const sidebarRef = useRef(null);
+  const menuTriggerRef = useRef(null);
+  const refreshTimer = useRef(null);
   const isLocalEnvironment = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+  const roleLabels = { owner: 'Propriétaire', admin: 'Administrateur', analyst: 'Analyste', viewer: 'Lecteur' };
+  const email = currentUser?.email || '';
+
+  useEffect(() => {
+    const query = window.matchMedia('(max-width: 780px)');
+    const update = () => { setIsMobile(query.matches); if (!query.matches) setMobileOpen(false); };
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+
+  useEffect(() => {
+    if (!accountOpen) return;
+    accountRef.current?.querySelector('[role="menuitem"]')?.focus();
+    const outside = (event) => { if (!accountRef.current?.contains(event.target)) setAccountOpen(false); };
+    const escape = (event) => { if (event.key === 'Escape') { setAccountOpen(false); avatarRef.current?.focus(); } };
+    document.addEventListener('pointerdown', outside);
+    document.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape); };
+  }, [accountOpen]);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    setAccountOpen(false);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    sidebarRef.current?.querySelector('button')?.focus();
+    const keydown = (event) => {
+      if (event.key === 'Escape') { setMobileOpen(false); return; }
+      if (event.key !== 'Tab') return;
+      const buttons = [...sidebarRef.current.querySelectorAll('button')].filter(el => el.getClientRects().length);
+      const first = buttons[0], last = buttons.at(-1);
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    };
+    document.addEventListener('keydown', keydown);
+    return () => { document.body.style.overflow = previousOverflow; document.removeEventListener('keydown', keydown); menuTriggerRef.current?.focus(); };
+  }, [mobileOpen]);
+
+  useEffect(() => () => clearTimeout(refreshTimer.current), []);
+
+  function accountKeyboard(event) {
+    const items = [...accountRef.current.querySelectorAll('[role="menuitem"]')];
+    const index = items.indexOf(document.activeElement);
+    const next = event.key === 'ArrowDown' ? (index + 1) % items.length : event.key === 'ArrowUp' ? (index - 1 + items.length) % items.length : event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : null;
+    if (next !== null) { event.preventDefault(); items[next]?.focus(); }
+    if (event.key === 'Tab') setAccountOpen(false);
+  }
+
+  async function refresh() {
+    if (isRefreshing) return;
+    setRefreshed(false);
+    const success = await onRefresh();
+    if (success) {
+      setRefreshed(true);
+      clearTimeout(refreshTimer.current);
+      refreshTimer.current = setTimeout(() => setRefreshed(false), 2500);
+    }
+  }
 
   function navigate(page) {
     onNavigate(page);
     setMobileOpen(false);
+    setAccountOpen(false);
   }
 
   return (
     <div className="app-shell">
-      <button className="mobile-menu" onClick={() => setMobileOpen(true)} aria-label="Ouvrir le menu">☰</button>
+      <a className="skip-link" href="#main-content" onClick={event => { event.preventDefault(); document.getElementById('main-content')?.focus(); }}>Aller au contenu</a>
       {mobileOpen && <button className="sidebar-backdrop" onClick={() => setMobileOpen(false)} aria-label="Fermer le menu" />}
-      <aside className={`sidebar ${mobileOpen ? "open" : ""}`}>
+      <aside id="main-sidebar" ref={sidebarRef} className={`sidebar ${mobileOpen ? "open" : ""}`} inert={isMobile && !mobileOpen} aria-label="Menu CyberPME">
+        <button className="sidebar-close" onClick={() => setMobileOpen(false)} aria-label="Fermer la navigation"><InterfaceIcon name="close"/></button>
         <div className="sidebar-brand"><BrandLogo compact /></div>
         <nav aria-label="Navigation principale">
           <p>SUPERVISION</p>
           {navigation.slice(0, 8).map((item) => (
-            <button key={item.id} className={activePage === item.id ? "active" : ""} onClick={() => navigate(item.id)}>
+            <button key={item.id} aria-current={activePage === item.id ? 'page' : undefined} className={activePage === item.id ? "active" : ""} onClick={() => navigate(item.id)}>
               <NavIcon name={item.id}/><span>{item.label}</span>
             </button>
           ))}
           <p>COMPTE</p>
-          <button className={activePage === "settings" ? "active" : ""} onClick={() => navigate("settings")}>
+          <button aria-current={activePage === 'settings' ? 'page' : undefined} className={activePage === "settings" ? "active" : ""} onClick={() => navigate("settings")}>
             <NavIcon name="settings"/><span>Paramètres</span>
           </button>
         </nav>
-        <div className="sidebar-footer"><span className="api-dot online"/><div><strong>{isLocalEnvironment ? "CyberPME Local" : "CyberPME Démo"}</strong><small>{isLocalEnvironment ? "Environnement de développement" : "Environnement de démonstration"}</small></div></div>
+        <div className="sidebar-footer"><InterfaceIcon name="shield"/><div><strong>{currentUser?.organization_name || 'CyberPME Africa'}</strong><small>{isLocalEnvironment ? "Espace de développement" : "Espace de démonstration"}</small></div></div>
       </aside>
 
-      <div className="app-workspace">
+      <div className="app-workspace" inert={isMobile && mobileOpen}>
         <header className="topbar">
-          <div><p>CYBERPME AFRICA</p><h1>{pageNames[activePage]}</h1></div>
+          <div className="topbar-title"><button ref={menuTriggerRef} className="mobile-menu" onClick={() => setMobileOpen(true)} aria-controls="main-sidebar" aria-expanded={mobileOpen} aria-label="Ouvrir la navigation"><InterfaceIcon name="menu"/></button><div><p>ESPACE DE SUPERVISION</p><h1>{pageNames[activePage]}</h1></div></div>
           <div className="topbar-actions">
-            <span className={`api-health ${apiOnline ? "online" : "offline"}`}><i/>{apiOnline ? "API connectée" : "API indisponible"}</span>
-            <button onClick={onRefresh} disabled={isRefreshing}>{isRefreshing ? "Actualisation..." : "Actualiser"}</button>
-            <button className="user-avatar" title={`${currentUser?.email} · Déconnexion`} onClick={onLogout}>
-              {currentUser?.email?.slice(0, 2).toUpperCase() || "CP"}
-            </button>
+            <span className={`api-health ${apiOnline === false ? 'offline' : apiOnline ? 'online' : 'pending'}`} title={lastUpdated ? `Dernière synchronisation : ${lastUpdated.toLocaleTimeString('fr-FR')}` : 'En attente de synchronisation'}><i/>{apiOnline === false ? 'Connexion interrompue' : apiOnline ? 'API connectée' : 'Connexion…'}</span>
+            <button className={`refresh-button ${refreshed ? 'is-done' : ''}`} onClick={refresh} disabled={isRefreshing} aria-busy={isRefreshing} aria-label={isRefreshing ? 'Actualisation en cours' : 'Actualiser les données'}><InterfaceIcon name={refreshed ? 'check' : 'refresh'} className={isRefreshing ? 'is-spinning' : ''}/><span>{isRefreshing ? "Actualisation…" : refreshed ? 'À jour' : 'Actualiser'}</span></button>
+            <div className="account-control" ref={accountRef}>
+              <button ref={avatarRef} className="account-trigger" onClick={() => setAccountOpen(!accountOpen)} aria-haspopup="menu" aria-expanded={accountOpen} aria-controls="account-menu" aria-label="Ouvrir le menu du compte">
+                <span className="user-avatar">{email.slice(0, 2).toUpperCase() || 'CP'}</span><InterfaceIcon name="chevron"/>
+              </button>
+              {accountOpen && <div id="account-menu" className="account-menu" role="menu" aria-label="Mon compte" onKeyDown={accountKeyboard}>
+                <div className="account-identity" role="presentation"><span className="account-label">MON ESPACE</span><strong>{email}</strong><span>{roleLabels[currentUser?.role] || 'Membre'} · {currentUser?.organization_name || 'CyberPME'}</span></div>
+                <button role="menuitem" onClick={() => navigate('settings')}><InterfaceIcon name="account"/>Mon compte et paramètres<InterfaceIcon name="arrow"/></button>
+                <button role="menuitem" className="account-logout" onClick={() => { setAccountOpen(false); onLogout(); }}><InterfaceIcon name="logout"/>Se déconnecter</button>
+              </div>}
+            </div>
           </div>
         </header>
-        <div className="update-line" aria-live="polite">
-          {lastUpdated ? `Dernière synchronisation à ${lastUpdated.toLocaleTimeString("fr-FR")}` : "Chargement des données..."}
+        <span className="sr-only" role="status">{refreshed ? 'Données actualisées.' : ''}</span>
+        <div className={`update-line ${apiOnline === false ? 'sync-error' : ''}`} aria-live="off">
+          <InterfaceIcon name={apiOnline === false ? 'alerts' : 'clock'}/>{apiOnline === false ? 'Synchronisation indisponible · réessayez dans un instant' : lastUpdated ? `Synchronisé à ${lastUpdated.toLocaleTimeString("fr-FR")}` : "Première synchronisation…"}
         </div>
-        <main className="page-content">{children}</main>
+        <main id="main-content" tabIndex={-1} className="page-content"><div key={activePage} className="page-transition">{children}</div></main>
       </div>
     </div>
   );

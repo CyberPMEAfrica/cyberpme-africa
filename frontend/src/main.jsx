@@ -16,12 +16,16 @@ import ReportsPage from "./ReportsPage";
 import SecurityEventsPage from "./SecurityEventsPage";
 import SettingsPage from "./SettingsPage";
 import SslMonitor from "./SslMonitor";
+import InterfaceIcon from "./InterfaceIcon";
+import OverviewScene from "./OverviewScene";
+import "./experience.css";
 
 const API_URL = (import.meta.env.VITE_API_URL || window.location.origin).replace(/\/$/, "");
 const labels = { unknown: "En attente", online: "Opérationnel", warning: "Attention", critical: "Critique" };
 
 function Metric({ label, value }) {
-  return <div className="metric"><span>{label}</span><strong>{value == null ? "—" : `${Math.round(value)} %`}</strong></div>;
+  const percentage = Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : null;
+  return <div className="metric"><span>{label}</span><strong>{percentage == null ? "—" : `${Math.round(percentage)} %`}</strong><div className={`metric-track ${percentage >= 90 ? 'metric-high' : percentage >= 75 ? 'metric-elevated' : ''}`} aria-hidden="true"><i style={{width: `${percentage ?? 0}%`}}/></div></div>;
 }
 
 function ServerCards({ servers, error, limit }) {
@@ -53,11 +57,15 @@ function AlertCards({ alerts, limit }) {
 function OverviewPage({ servers, alerts, error }) {
   const active = servers.filter((server) => server.status === "online").length;
   return <>
-    <section className="overview-hero"><p className="eyebrow">CENTRE DE SUPERVISION</p><h2>Vos systèmes, sous contrôle.</h2><p>Une vue claire et immédiate de la santé de votre infrastructure.</p></section>
-    <section className="summary overview-summary"><div><span>Serveurs suivis</span><strong>{servers.length}</strong></div><div><span>Opérationnels</span><strong className="green">{active}</strong></div><div><span>Alertes actives</span><strong className={alerts.length ? "red" : "green"}>{alerts.length}</strong></div></section>
+    <section className="overview-hero"><div className="hero-content"><p className="eyebrow">CENTRE DE SUPERVISION</p><h2>Vos systèmes,<br/>sous contrôle.</h2><p>Une vue claire de votre infrastructure.<br/>Les bonnes priorités, au même endroit.</p><a className="hero-action" href="#/servers">Explorer mes serveurs<InterfaceIcon name="arrow"/></a></div><OverviewScene/></section>
+    <section className="summary overview-summary" aria-label="Indicateurs de supervision">
+      <a className="summary-card" href="#/servers"><span className="summary-icon"><InterfaceIcon name="servers"/></span><span className="summary-copy"><span>Serveurs suivis</span><strong>{servers.length}</strong><small>Consulter le parc<InterfaceIcon name="arrow"/></small></span></a>
+      <a className="summary-card" href="#/servers"><span className="summary-icon"><InterfaceIcon name="shield"/></span><span className="summary-copy"><span>Opérationnels</span><strong className="green">{active}</strong><small>Voir les ressources<InterfaceIcon name="arrow"/></small></span></a>
+      <a className={`summary-card ${alerts.length ? 'has-alerts' : ''}`} href="#/alerts"><span className="summary-icon"><InterfaceIcon name="alerts"/></span><span className="summary-copy"><span>Alertes actives</span><strong className={alerts.length ? "red" : "green"}>{alerts.length}</strong><small>Examiner les priorités<InterfaceIcon name="arrow"/></small></span></a>
+    </section>
     <div className="overview-columns">
-      <section className="overview-block"><p className="eyebrow">INFRASTRUCTURE</p><h2>État récent</h2><ServerCards servers={servers} error={error} limit={3}/></section>
-      <section className="overview-block"><p className="eyebrow">INCIDENTS</p><h2>Priorités</h2><AlertCards alerts={alerts} limit={3}/></section>
+      <section className="overview-block"><div className="block-heading"><div><p className="eyebrow">INFRASTRUCTURE</p><h2>État récent</h2></div><a className="text-link" href="#/servers">Tout voir<InterfaceIcon name="arrow"/></a></div><ServerCards servers={servers} error={error} limit={3}/></section>
+      <section className="overview-block"><div className="block-heading"><div><p className="eyebrow">INCIDENTS</p><h2>Priorités</h2></div><a className="text-link" href="#/alerts">Tout voir<InterfaceIcon name="arrow"/></a></div><AlertCards alerts={alerts} limit={3}/></section>
     </div>
   </>;
 }
@@ -103,9 +111,9 @@ function App() {
     localStorage.setItem("cyberpme_theme", theme);
   }, [theme]);
 
-  async function loadData(token = sessionToken) {
+  async function loadData(token = sessionToken, quiet = false) {
     if (!token) return;
-    setIsRefreshing(true);
+    if (!quiet) setIsRefreshing(true);
     try {
       const request = (path) => fetch(`${API_URL}${path}`, { headers: { Authorization: `Bearer ${token}` } });
       const [serverResponse, alertResponse, scanResponse, sslResponse, backupResponse, securityResponse, connectorResponse] = await Promise.all([
@@ -123,10 +131,12 @@ function App() {
       setIdsConnectors(await connectorResponse.json());
       setError("");
       setLastUpdated(new Date());
+      return true;
     } catch {
-      setError("Impossible de joindre l’API. Vérifiez Docker.");
+      setError("La synchronisation a échoué. Vérifiez votre connexion, puis réessayez avec Actualiser.");
+      return false;
     } finally {
-      setIsRefreshing(false);
+      if (!quiet) setIsRefreshing(false);
     }
   }
 
@@ -151,7 +161,7 @@ function App() {
         loadData(sessionToken);
       })
       .catch(() => { localStorage.removeItem("cyberpme_session"); setSessionToken(""); setCurrentUser(null); });
-    const timer = setInterval(() => loadData(sessionToken), 10000);
+    const timer = setInterval(() => loadData(sessionToken, true), 10000);
     return () => clearInterval(timer);
   }, [sessionToken]);
 
@@ -161,10 +171,14 @@ function App() {
   }
 
   async function logout() {
-    if (sessionToken) await fetch(`${API_URL}/api/v1/auth/logout`, { method: "POST", headers: { Authorization: `Bearer ${sessionToken}` } });
-    localStorage.removeItem("cyberpme_session");
-    setSessionToken("");
-    setCurrentUser(null);
+    try {
+      if (sessionToken) await fetch(`${API_URL}/api/v1/auth/logout`, { method: "POST", headers: { Authorization: `Bearer ${sessionToken}` } });
+    } catch { /* The local session is cleared even when the network is unavailable. */ }
+    finally {
+      localStorage.removeItem("cyberpme_session");
+      setSessionToken("");
+      setCurrentUser(null);
+    }
   }
 
   function passwordChanged() {
@@ -185,7 +199,8 @@ function App() {
       window.location.hash = "/overview";
     }}/>;
   }
-  if (!sessionToken || !currentUser) return <LoginPage apiUrl={API_URL} onAuthenticated={authenticated}/>;
+  if (sessionToken && !currentUser) return <div className="session-loading" role="status"><InterfaceIcon name="refresh" className="is-spinning"/><p>Ouverture de votre espace…</p></div>;
+  if (!sessionToken) return <LoginPage apiUrl={API_URL} onAuthenticated={authenticated}/>;
 
   let page;
   if (activePage === "servers") page = <ServersPage servers={servers} error={error}/>;
@@ -206,7 +221,7 @@ function App() {
   );
   else page = <OverviewPage servers={servers} alerts={alerts} error={error}/>;
 
-  return <AppShell activePage={activePage} onNavigate={navigate} apiOnline={!error} isRefreshing={isRefreshing} lastUpdated={lastUpdated} onRefresh={() => loadData()} currentUser={currentUser} onLogout={logout}>
+  return <AppShell activePage={activePage} onNavigate={navigate} apiOnline={error ? false : lastUpdated ? true : null} isRefreshing={isRefreshing} lastUpdated={lastUpdated} onRefresh={() => loadData()} currentUser={currentUser} onLogout={logout}>
     {error && <p className="error">{error}</p>}
     {page}
   </AppShell>;
