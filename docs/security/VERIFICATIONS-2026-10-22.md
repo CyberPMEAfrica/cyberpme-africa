@@ -37,6 +37,15 @@ Les contrôles suivants ont été ajoutés :
 
 Ces résultats ne couvrent ni une installation réelle sur Ubuntu/Debian, ni le comportement du nouveau compte de service Windows après redémarrage, ni les paramètres de production actuellement en ligne.
 
+## Complément — déconnexion immédiate
+
+- Le tableau de bord est masqué et ses données locales effacées dès le clic, sans attendre le serveur. Les lectures en cours sont annulées et les réponses anciennes ne peuvent plus restaurer les données de la session.
+- Les actualisations périodiques sont arrêtées. La révocation côté API reste obligatoire : délai borné à 8 secondes, message explicite et bouton de nouvelle tentative en cas de panne. La reconnexion reste indisponible tant que cette révocation n'est pas confirmée.
+- Un marqueur temporaire sans identifiant ni secret empêche le rechargement du même onglet de rouvrir une session cookie dont la révocation est encore incertaine. Ce contrôle d'interface ne remplace pas la révocation serveur.
+- Frontend : **13 tests unitaires réussis**, compilation réussie. Test navigateur isolé `frontend/tests/logout-browser.cjs` : retour immédiat, requête lente, délai dépassé, réponse tardive, panne réseau, erreur serveur, rechargement, nouvelle tentative et déconnexion normale vérifiés.
+- Recette de rafraîchissement automatique : les neuf contrôles existants passent, notamment la période de 10 secondes, la reprise après panne et les affichages mobile/bureau.
+- Ces constats sont locaux ; ils ne prouvent pas la publication sur Vercel.
+
 ## Restant avant publication / client
 
 1. Préproduction avec base et secrets propres ; migration sur copie et restauration testées.

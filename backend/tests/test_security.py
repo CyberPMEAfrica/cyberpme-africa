@@ -2,6 +2,7 @@
 import hashlib
 import time
 from datetime import timedelta
+from types import SimpleNamespace
 from uuid import UUID
 import pytest
 from cryptography.fernet import Fernet
@@ -88,7 +89,11 @@ def test_shared_legacy_enrollment_is_disabled(client):
     assert response.status_code == 401
 
 
-def test_login_throttle_is_persisted_and_generic(client):
+def test_login_throttle_is_persisted_and_generic(client, monkeypatch):
+    # A live clock can cross a 15-minute boundary during password hashing in CI.
+    # Replace only this module's clock, not Python's process-wide time module.
+    clock = [1_800_000_000]
+    monkeypatch.setattr(security, 'time', SimpleNamespace(time=lambda: clock[0]))
     bad = LOGIN | {'password': 'not-the-password-1234'}
     for _ in range(8):
         assert client.post('/api/v1/auth/login', json=bad).status_code == 401
@@ -97,6 +102,8 @@ def test_login_throttle_is_persisted_and_generic(client):
     assert response.headers['retry-after'] == '900'
     # Successful credentials do not bypass the shared counter.
     assert client.post('/api/v1/auth/login', json=LOGIN).status_code == 429
+    clock[0] += 900
+    assert client.post('/api/v1/auth/login', json=LOGIN).status_code == 200
 
 
 def test_mfa_required_restricts_session_until_enrolled(client, user_headers, monkeypatch):

@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { API_URL, apiFetch as fetch } from './api';
+import { LOGOUT_PENDING_KEY, revokeBrowserSession } from './logout-session';
 import MfaPanel from './MfaPanel';
 import { createRoot } from "react-dom/client";
 import "./styles.css";
@@ -78,7 +79,7 @@ function invitationTokenFromHash() {
 function App() {
   const [sessionToken, setSessionToken] = useState(() => {
     localStorage.removeItem('cyberpme_session');
-    return 'cookie'; // Presence is checked with /auth/me, never stored in JS.
+    return sessionStorage.getItem(LOGOUT_PENDING_KEY) ? '' : 'cookie';
   });
   const [currentUser, setCurrentUser] = useState(null);
   const [theme, setTheme] = useState(() => localStorage.getItem("cyberpme_theme") || "dark");
@@ -93,6 +94,11 @@ function App() {
   const [error, setError] = useState("");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState(null);
+  const [logoutStatus, setLogoutStatus] = useState(() => sessionStorage.getItem(LOGOUT_PENDING_KEY) ? 'pending' : 'idle');
+  const sessionEpoch = useRef(0);
+  const syncRequests = useRef(new Set());
+  const refreshInterval = useRef(null);
+  const logoutRequest = useRef(null);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -101,31 +107,31 @@ function App() {
   }, [theme]);
 
   async function loadData(token = sessionToken) {
-    if (!token) return;
+    if (!token || sessionStorage.getItem(LOGOUT_PENDING_KEY)) return false;
+    const epoch = sessionEpoch.current;
+    const controller = new AbortController();
+    syncRequests.current.add(controller);
     setIsRefreshing(true);
     try {
-      const request = (path) => fetch(`${API_URL}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+      const request = (path) => fetch(`${API_URL}${path}`, { signal: controller.signal });
       const [serverResponse, alertResponse, scanResponse, sslResponse, backupResponse, securityResponse, connectorResponse] = await Promise.all([
         request("/api/v1/servers"), request("/api/v1/alerts"), request("/api/v1/network-scans"),
         request("/api/v1/ssl-checks"), request("/api/v1/backup-checks"), request("/api/v1/security-events"),
         request("/api/v1/ids-connectors"),
       ]);
       if (!serverResponse.ok || !alertResponse.ok || !scanResponse.ok || !sslResponse.ok || !backupResponse.ok || !securityResponse.ok || !connectorResponse.ok) throw new Error();
-      setServers(await serverResponse.json());
-      setAlerts(await alertResponse.json());
-      setNetworkScans(await scanResponse.json());
-      setSslChecks(await sslResponse.json());
-      setBackupChecks(await backupResponse.json());
-      setSecurityEvents(await securityResponse.json());
-      setIdsConnectors(await connectorResponse.json());
+      const data = await Promise.all([serverResponse, alertResponse, scanResponse, sslResponse, backupResponse, securityResponse, connectorResponse].map(response => response.json()));
+      if (epoch !== sessionEpoch.current || controller.signal.aborted) return false;
+      [setServers, setAlerts, setNetworkScans, setSslChecks, setBackupChecks, setSecurityEvents, setIdsConnectors].forEach((set, index) => set(data[index]));
       setError("");
       setLastUpdated(new Date());
       return true;
     } catch {
-      setError("La synchronisation a échoué. Vérifiez votre connexion, puis réessayez avec Actualiser.");
+      if (epoch === sessionEpoch.current && !controller.signal.aborted) setError("La synchronisation a échoué. Vérifiez votre connexion, puis réessayez avec Actualiser.");
       return false;
     } finally {
-      setIsRefreshing(false);
+      syncRequests.current.delete(controller);
+      if (epoch === sessionEpoch.current) setIsRefreshing(false);
     }
   }
 
@@ -142,37 +148,63 @@ function App() {
 
   useEffect(() => {
     if (!sessionToken) { setCurrentUser(null); return; }
-    fetch(`${API_URL}/api/v1/auth/me`, { headers: { Authorization: `Bearer ${sessionToken}` } })
+    const epoch = sessionEpoch.current;
+    const controller = new AbortController();
+    syncRequests.current.add(controller);
+    const isCurrent = () => epoch === sessionEpoch.current && !controller.signal.aborted;
+    fetch(`${API_URL}/api/v1/auth/me`, { signal: controller.signal })
       .then(response => { if (!response.ok) throw new Error(); return response.json(); })
       .then(user => {
+        if (!isCurrent()) return;
         setCurrentUser(user);
         setTheme(user.theme || "dark");
         loadData(sessionToken);
       })
-      .catch(() => { localStorage.removeItem("cyberpme_session"); setSessionToken(""); setCurrentUser(null); });
+      .catch(() => { if (isCurrent()) clearLocalSession(); })
+      .finally(() => syncRequests.current.delete(controller));
     const timer = setInterval(() => loadData(sessionToken), AUTO_REFRESH_MS);
-    return () => clearInterval(timer);
+    refreshInterval.current = timer;
+    return () => { clearInterval(timer); controller.abort(); syncRequests.current.delete(controller); };
   }, [sessionToken]);
 
+  useEffect(() => {
+    if (sessionStorage.getItem(LOGOUT_PENDING_KEY)) logout();
+  }, []);
+
   function authenticated(session) {
+    sessionEpoch.current += 1;
+    setLogoutStatus('idle');
     setSessionToken('cookie');
   }
 
-  async function logout() {
-    try {
-      if (sessionToken) await fetch(`${API_URL}/api/v1/auth/logout`, { method: "POST", headers: { Authorization: `Bearer ${sessionToken}` } });
-    } catch { /* The local session is cleared even when the network is unavailable. */ }
-    finally {
-      localStorage.removeItem("cyberpme_session");
-      setSessionToken("");
-      setCurrentUser(null);
-    }
-  }
-
-  function passwordChanged() {
+  function clearLocalSession() {
+    sessionEpoch.current += 1;
+    clearInterval(refreshInterval.current);
+    for (const controller of syncRequests.current) controller.abort();
+    syncRequests.current.clear();
     localStorage.removeItem("cyberpme_session");
     setSessionToken("");
     setCurrentUser(null);
+    [setServers, setAlerts, setNetworkScans, setSslChecks, setBackupChecks, setSecurityEvents, setIdsConnectors].forEach(set => set([]));
+    setError('');
+    setLastUpdated(null);
+    setIsRefreshing(false);
+  }
+
+  function logout() {
+    if (logoutRequest.current) return logoutRequest.current;
+    sessionStorage.setItem(LOGOUT_PENDING_KEY, '1');
+    clearLocalSession();
+    setLogoutStatus('pending');
+    logoutRequest.current = revokeBrowserSession(fetch, `${API_URL}/api/v1/auth/logout`)
+      .then(() => { sessionStorage.removeItem(LOGOUT_PENDING_KEY); setLogoutStatus('done'); })
+      .catch(() => setLogoutStatus('failed'))
+      .finally(() => { logoutRequest.current = null; });
+    return logoutRequest.current;
+  }
+
+  function passwordChanged() {
+    clearLocalSession();
   }
 
   function themeChanged(user) {
@@ -181,14 +213,14 @@ function App() {
   }
 
   const invitationToken = invitationTokenFromHash();
-  if (invitationToken) {
+  if (invitationToken && logoutStatus !== 'pending' && logoutStatus !== 'failed') {
     return <InvitationPage apiUrl={API_URL} token={invitationToken} onAuthenticated={(session) => {
       authenticated(session);
       window.location.hash = "/overview";
     }}/>;
   }
   if (sessionToken && !currentUser) return <div className="session-loading" role="status"><InterfaceIcon name="refresh" className="is-spinning"/><p>Ouverture de votre espace…</p></div>;
-  if (!sessionToken) return <LoginPage apiUrl={API_URL} onAuthenticated={authenticated}/>;
+  if (!sessionToken) return <LoginPage apiUrl={API_URL} onAuthenticated={authenticated} logoutStatus={logoutStatus} onRetryLogout={logout}/>;
   if (currentUser?.mfa_setup_required) return <main className="login-screen"><section className="login-card"><h1>Sécuriser votre compte</h1><p>L’authentification à deux facteurs est obligatoire avant d’accéder aux données.</p><MfaPanel apiUrl={API_URL} onReconnect={passwordChanged}/><button className="secondary-button" onClick={logout}>Se déconnecter</button></section></main>;
 
   let page;
