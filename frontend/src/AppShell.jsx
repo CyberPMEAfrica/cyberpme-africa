@@ -33,7 +33,7 @@ function NavIcon({ name }) {
 export const pageNames = Object.fromEntries(navigation.map((item) => [item.id, item.label]));
 export const activePages = navigation.filter((item) => !item.upcoming).map((item) => item.id);
 
-export default function AppShell({ activePage, onNavigate, apiOnline, isRefreshing, lastUpdated, onRefresh, currentUser, onLogout, children }) {
+export default function AppShell({ activePage, onNavigate, apiOnline, isRefreshing, lastUpdated, refreshIntervalSeconds = 10, onRefresh, currentUser, onLogout, children }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 780px)').matches);
@@ -136,7 +136,7 @@ export default function AppShell({ activePage, onNavigate, apiOnline, isRefreshi
           <div className="topbar-title"><button ref={menuTriggerRef} className="mobile-menu" onClick={() => setMobileOpen(true)} aria-controls="main-sidebar" aria-expanded={mobileOpen} aria-label="Ouvrir la navigation"><InterfaceIcon name="menu"/></button><div><p>ESPACE DE SUPERVISION</p><h1>{pageNames[activePage]}</h1></div></div>
           <div className="topbar-actions">
             <span className={`api-health ${apiOnline === false ? 'offline' : apiOnline ? 'online' : 'pending'}`} title={lastUpdated ? `Dernière synchronisation : ${lastUpdated.toLocaleTimeString('fr-FR')}` : 'En attente de synchronisation'}><i/>{apiOnline === false ? 'Connexion interrompue' : apiOnline ? 'API connectée' : 'Connexion…'}</span>
-            <button className={`refresh-button ${refreshed ? 'is-done' : ''}`} onClick={refresh} disabled={isRefreshing} aria-busy={isRefreshing} aria-label={isRefreshing ? 'Actualisation en cours' : 'Actualiser les données'}><InterfaceIcon name={refreshed ? 'check' : 'refresh'} className={isRefreshing ? 'is-spinning' : ''}/><span>{isRefreshing ? "Actualisation…" : refreshed ? 'À jour' : 'Actualiser'}</span></button>
+            <button className={`refresh-button ${refreshed && !isRefreshing ? 'is-done' : ''}`} onClick={refresh} disabled={isRefreshing} aria-busy={isRefreshing} aria-label={isRefreshing ? 'Actualisation en cours' : 'Actualiser les données'}><InterfaceIcon name={refreshed && !isRefreshing ? 'check' : 'refresh'} className={isRefreshing ? 'is-spinning' : ''}/><span>{isRefreshing ? "Actualisation…" : refreshed ? 'À jour' : 'Actualiser'}</span></button>
             <div className="account-control" ref={accountRef}>
               <button ref={avatarRef} className="account-trigger" onClick={() => setAccountOpen(!accountOpen)} aria-haspopup="menu" aria-expanded={accountOpen} aria-controls="account-menu" aria-label="Ouvrir le menu du compte">
                 <span className="user-avatar">{email.slice(0, 2).toUpperCase() || 'CP'}</span><InterfaceIcon name="chevron"/>
@@ -151,7 +151,8 @@ export default function AppShell({ activePage, onNavigate, apiOnline, isRefreshi
         </header>
         <span className="sr-only" role="status">{refreshed ? 'Données actualisées.' : ''}</span>
         <div className={`update-line ${apiOnline === false ? 'sync-error' : ''}`} aria-live="off">
-          <InterfaceIcon name={apiOnline === false ? 'alerts' : 'clock'}/>{apiOnline === false ? 'Synchronisation indisponible · réessayez dans un instant' : lastUpdated ? `Synchronisé à ${lastUpdated.toLocaleTimeString("fr-FR")}` : "Première synchronisation…"}
+          <span className="auto-refresh-note"><InterfaceIcon name="refresh"/>{apiOnline === false ? 'Nouvel essai automatique' : 'Mise à jour automatique'} · {refreshIntervalSeconds} s</span>
+          <span className="sync-timestamp" key={lastUpdated?.getTime()}><InterfaceIcon name={apiOnline === false ? 'alerts' : isRefreshing ? 'refresh' : 'clock'}/>{isRefreshing ? 'Synchronisation en cours…' : apiOnline === false ? 'Synchronisation indisponible' : lastUpdated ? `Synchronisé à ${lastUpdated.toLocaleTimeString("fr-FR")}` : "Première synchronisation…"}</span>
         </div>
         <main id="main-content" tabIndex={-1} className="page-content"><div key={activePage} className="page-transition">{children}</div></main>
       </div>

@@ -17,10 +17,11 @@ import SecurityEventsPage from "./SecurityEventsPage";
 import SettingsPage from "./SettingsPage";
 import SslMonitor from "./SslMonitor";
 import InterfaceIcon from "./InterfaceIcon";
-import OverviewScene from "./OverviewScene";
+import OverviewDashboard from "./OverviewDashboard";
 import "./experience.css";
 
 const API_URL = (import.meta.env.VITE_API_URL || window.location.origin).replace(/\/$/, "");
+const AUTO_REFRESH_MS = 10_000;
 const labels = { unknown: "En attente", online: "Opérationnel", warning: "Attention", critical: "Critique" };
 
 function Metric({ label, value }) {
@@ -52,22 +53,6 @@ function AlertCards({ alerts, limit }) {
       <h3>{alert.message}</h3><p>{alert.recommendation}</p>
     </article>
   ))}</div>;
-}
-
-function OverviewPage({ servers, alerts, error }) {
-  const active = servers.filter((server) => server.status === "online").length;
-  return <>
-    <section className="overview-hero"><div className="hero-content"><p className="eyebrow">CENTRE DE SUPERVISION</p><h2>Vos systèmes,<br/>sous contrôle.</h2><p>Une vue claire de votre infrastructure.<br/>Les bonnes priorités, au même endroit.</p><a className="hero-action" href="#/servers">Explorer mes serveurs<InterfaceIcon name="arrow"/></a></div><OverviewScene/></section>
-    <section className="summary overview-summary" aria-label="Indicateurs de supervision">
-      <a className="summary-card" href="#/servers"><span className="summary-icon"><InterfaceIcon name="servers"/></span><span className="summary-copy"><span>Serveurs suivis</span><strong>{servers.length}</strong><small>Consulter le parc<InterfaceIcon name="arrow"/></small></span></a>
-      <a className="summary-card" href="#/servers"><span className="summary-icon"><InterfaceIcon name="shield"/></span><span className="summary-copy"><span>Opérationnels</span><strong className="green">{active}</strong><small>Voir les ressources<InterfaceIcon name="arrow"/></small></span></a>
-      <a className={`summary-card ${alerts.length ? 'has-alerts' : ''}`} href="#/alerts"><span className="summary-icon"><InterfaceIcon name="alerts"/></span><span className="summary-copy"><span>Alertes actives</span><strong className={alerts.length ? "red" : "green"}>{alerts.length}</strong><small>Examiner les priorités<InterfaceIcon name="arrow"/></small></span></a>
-    </section>
-    <div className="overview-columns">
-      <section className="overview-block"><div className="block-heading"><div><p className="eyebrow">INFRASTRUCTURE</p><h2>État récent</h2></div><a className="text-link" href="#/servers">Tout voir<InterfaceIcon name="arrow"/></a></div><ServerCards servers={servers} error={error} limit={3}/></section>
-      <section className="overview-block"><div className="block-heading"><div><p className="eyebrow">INCIDENTS</p><h2>Priorités</h2></div><a className="text-link" href="#/alerts">Tout voir<InterfaceIcon name="arrow"/></a></div><AlertCards alerts={alerts} limit={3}/></section>
-    </div>
-  </>;
 }
 
 function ServersPage({ servers, error }) {
@@ -111,9 +96,9 @@ function App() {
     localStorage.setItem("cyberpme_theme", theme);
   }, [theme]);
 
-  async function loadData(token = sessionToken, quiet = false) {
+  async function loadData(token = sessionToken) {
     if (!token) return;
-    if (!quiet) setIsRefreshing(true);
+    setIsRefreshing(true);
     try {
       const request = (path) => fetch(`${API_URL}${path}`, { headers: { Authorization: `Bearer ${token}` } });
       const [serverResponse, alertResponse, scanResponse, sslResponse, backupResponse, securityResponse, connectorResponse] = await Promise.all([
@@ -136,7 +121,7 @@ function App() {
       setError("La synchronisation a échoué. Vérifiez votre connexion, puis réessayez avec Actualiser.");
       return false;
     } finally {
-      if (!quiet) setIsRefreshing(false);
+      setIsRefreshing(false);
     }
   }
 
@@ -161,7 +146,7 @@ function App() {
         loadData(sessionToken);
       })
       .catch(() => { localStorage.removeItem("cyberpme_session"); setSessionToken(""); setCurrentUser(null); });
-    const timer = setInterval(() => loadData(sessionToken, true), 10000);
+    const timer = setInterval(() => loadData(sessionToken), AUTO_REFRESH_MS);
     return () => clearInterval(timer);
   }, [sessionToken]);
 
@@ -219,9 +204,9 @@ function App() {
       onThemeChanged={themeChanged}
     />
   );
-  else page = <OverviewPage servers={servers} alerts={alerts} error={error}/>;
+  else page = <OverviewDashboard servers={servers} alerts={alerts} networkScans={networkScans} sslChecks={sslChecks} backupChecks={backupChecks} securityEvents={securityEvents} lastUpdated={lastUpdated} error={error}/>;
 
-  return <AppShell activePage={activePage} onNavigate={navigate} apiOnline={error ? false : lastUpdated ? true : null} isRefreshing={isRefreshing} lastUpdated={lastUpdated} onRefresh={() => loadData()} currentUser={currentUser} onLogout={logout}>
+  return <AppShell activePage={activePage} onNavigate={navigate} apiOnline={error ? false : lastUpdated ? true : null} isRefreshing={isRefreshing} lastUpdated={lastUpdated} refreshIntervalSeconds={AUTO_REFRESH_MS / 1000} onRefresh={() => loadData()} currentUser={currentUser} onLogout={logout}>
     {error && <p className="error">{error}</p>}
     {page}
   </AppShell>;

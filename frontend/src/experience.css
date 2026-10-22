@@ -70,7 +70,11 @@ button[aria-busy="true"] { cursor: progress; }
 .account-menu button svg { width: 17px; height: 17px; }
 .account-menu button svg:last-child:not(:first-child) { margin-left: auto; width: 14px; }
 .topbar .account-menu .account-logout { color: #ed7c8a; }
-.update-line { display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-height: 32px; padding: 13px clamp(22px,3vw,44px) 0; color: var(--theme-subtle); font-size: 10px; }
+.update-line { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 16px; min-height: 32px; padding: 13px clamp(22px,3vw,44px) 0; color: var(--theme-subtle); font-size: 10px; }
+.update-line > span { display: inline-flex; align-items: center; gap: 6px; }
+.auto-refresh-note { color: var(--theme-muted); }
+.sync-error .auto-refresh-note { color: inherit; }
+.sync-timestamp { animation: sync-confirm 1800ms ease-out; }
 .update-line svg { width: 12px; height: 12px; }
 .sync-error { color: #e5a157; }
 .page-content { max-width: 1510px; padding: 26px clamp(22px,3vw,44px) 64px; }
@@ -170,6 +174,7 @@ button[aria-busy="true"] { cursor: progress; }
 .ssl-metrics strong { overflow-wrap: anywhere; }
 .is-spinning { animation: interface-spin 1s linear infinite; }
 @keyframes interface-spin { to { transform: rotate(360deg); } }
+@keyframes sync-confirm { from { color: var(--accent); } to { color: inherit; } }
 @keyframes shield-float { 0%,100% { transform: translateY(0) rotateY(-16deg) rotateX(8deg); } 50% { transform: translateY(-8px) rotateY(-10deg) rotateX(5deg); } }
 @keyframes menu-enter { from { opacity: 0; transform: translateY(-6px) scale(.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
 @keyframes page-enter { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
