@@ -16,14 +16,26 @@ Ces résultats concernent le code de la branche de durcissement, pas une certifi
 
 Un avertissement pytest de réécriture des assertions d’un module déjà importé apparaît avec le lanceur local ; il n’a pas empêché les tests. La bibliothèque de test Starlette signale aussi une dépréciation de l’intégration httpx existante.
 
-## CI ajoutée, à vérifier avant fusion
+## CI distante validée
+
+Révision de code vérifiée : `9e5c3cbc5dc3fd19ce548bbad4e1b30812567612`.
+[Exécution GitHub Actions réussie](https://github.com/CyberPMEAfrica/cyberpme-africa/actions/runs/39822296612).
+
+- Backend : **66 réussis, 2 ignorés**, puis **23 tests PostgreSQL réussis**, dont les deux tests de consommation concurrente des codes MFA.
+- Agent : **38 réussis, 1 ignoré** sur chacune des versions Python 3.10, 3.11, 3.12 et 3.13. Le test Windows spécifique reste ignoré sur le runner Linux.
+- Intégrations IDS : **30 réussis**.
+- Frontend : compilation et **8 tests réussis** ; audit npm sans vulnérabilité connue signalée.
+- Audit Python : aucune vulnérabilité connue signalée.
+- Analyse de syntaxe PowerShell 5.1 sur Windows et validation de configuration Docker Compose : réussies.
+
+Les contrôles suivants ont été ajoutés :
 
 - Exécution des tests de sécurité et d’actions sur PostgreSQL 17 jetable.
 - Deux tests de concurrence : un code TOTP ou de secours ne doit être accepté qu’une fois entre deux transactions concurrentes.
 - Audit Python avec rapport conservé en artifact CI ; audit npm bloquant.
 - Tests agent Python 3.10 à 3.13 et syntaxe PowerShell 5.1 sur runner Windows.
 
-Les résultats CI doivent être lus pour la révision exacte publiée ; cette section n’affirme pas qu’une exécution distante a déjà réussi.
+Ces résultats ne couvrent ni une installation réelle sur Ubuntu/Debian, ni le comportement du nouveau compte de service Windows après redémarrage, ni les paramètres de production actuellement en ligne.
 
 ## Restant avant publication / client
 
