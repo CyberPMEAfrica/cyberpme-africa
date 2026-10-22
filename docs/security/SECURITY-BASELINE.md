@@ -43,6 +43,8 @@ L’API bloque son build Vercel de production si ces prérequis ne sont pas remp
 
 Le cookie de production utilise le préfixe `__Host-`, sans attribut Domain. La publication d’une commande Windows nécessite la révision Git complète fournie par Vercel (`VERCEL_GIT_COMMIT_SHA`) ou explicitement au build (`CYBERPME_AGENT_REVISION`).
 
+Ordre de bascule : API durcie et migration d’abord, puis frontend. Son build de production vérifie le marqueur `/api/v1/security/readiness` du backend configuré ; il échoue si l’ancienne API est encore servie. Ne pas contourner ce garde-fou. Prévoir un créneau de maintenance pour l’inscription MFA, et relancer le build frontend si son premier essai a précédé la fin de publication de l’API.
+
 Génération locale possible, dans un terminal de confiance :
 
 ```text

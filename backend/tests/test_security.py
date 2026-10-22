@@ -16,6 +16,12 @@ from app import security
 LOGIN = {"organization_slug": "pme-test", "email": "owner@example.test", "password": "Test-password-very-strong-2026"}
 
 
+def test_release_readiness_reports_only_protocol(client):
+    response = client.get('/api/v1/security/readiness')
+    assert response.status_code == 200
+    assert response.json() == {'protocol': 'cyberpme-cookie-mfa-v1'}
+
+
 @pytest.fixture(autouse=True)
 def secure_settings(monkeypatch):
     monkeypatch.setattr(settings, 'allow_legacy_enrollment', False)

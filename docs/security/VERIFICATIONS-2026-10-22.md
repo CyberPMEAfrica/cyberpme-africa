@@ -6,7 +6,8 @@ Ces résultats concernent le code de la branche de durcissement, pas une certifi
 
 - Suite API/backend/agent isolée : **103 tests réussis, 2 ignorés** (concurrence réservée au PostgreSQL CI). Base SQLite de test, aucun accès à une base de production.
 - Relance ciblée après les derniers garde-fous : **31 réussis, 2 ignorés** ; couvre notamment le cookie `__Host-`, le refus de preview non isolée, les configurations de publication, la MFA et les restrictions d’agent.
-- Frontend : compilation de production réussie ; **6 tests de calcul des indicateurs réussis**.
+- Frontend : compilation de production réussie ; **8 tests réussis** (calculs des indicateurs et garde-fou de compatibilité de publication).
+- Marqueur de protocole API : test dédié réussi ; ne retourne ni secret ni diagnostic interne de base.
 - Navigateur Edge automatisé avec une API locale de test et proxy même origine : connexion, inscription MFA obligatoire, sauvegarde des codes, reconnexion avec code de secours, rechargement, cookie HttpOnly invisible à JavaScript, absence de jeton localStorage, rejet CSRF, rafraîchissement automatique, paramètres et réinitialisation MFA authentifiée : **réussis**.
 - Dashboard : **20 contrôles réussis** (trois thèmes, filtres, compteurs, plein écran, six largeurs 320–1920, taille de texte, réduction des animations, états vides).
 - Compilation Python et analyse de syntaxe de l’installateur PowerShell : réussies. Cela ne remplace pas une installation et un redémarrage réels sous Windows.

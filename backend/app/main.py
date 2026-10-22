@@ -360,6 +360,14 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/api/v1/security/readiness")
+def security_readiness(db: Session = Depends(get_db)):
+    # Public protocol marker, never a claim of certification. Check schema before
+    # allowing the new cookie-based frontend to replace a legacy deployment.
+    db.execute(select(AccountSecurity.user_id).limit(1)).first()
+    return {"protocol": "cyberpme-cookie-mfa-v1"}
+
+
 @app.post("/api/v1/auth/login", response_model=SessionRead)
 def login(payload: LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)) -> SessionRead:
     charge_auth_attempt(db, request, payload.organization_slug + ":" + payload.email)
