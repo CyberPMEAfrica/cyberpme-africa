@@ -44,6 +44,17 @@ jobs:
   backend:
     name: Tests backend
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: security_ci
+          POSTGRES_PASSWORD: disposable-ci-only
+          POSTGRES_DB: security_ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U security_ci -d security_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - name: Récupérer le code
         uses: actions/checkout@v4
@@ -60,6 +71,21 @@ jobs:
           SMTP_HOST: localhost
           SMTP_PORT: "1025"
         run: pytest -q
+      - name: Tester les contrôles de sécurité sur PostgreSQL isolé
+        env:
+          TEST_POSTGRES_URL: postgresql+psycopg://security_ci:disposable-ci-only@localhost:5432/security_ci
+          SMTP_HOST: localhost
+        run: python backend/scripts/test_postgres_security.py
+      - name: Auditer les dépendances Python
+        run: |
+          python -m pip install --upgrade pip pip-audit
+          python -m pip_audit --local --skip-editable --format json --output python-audit.json
+      - name: Conserver les preuves Python
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-security-audit
+          path: python-audit.json
 
   integrations:
     name: Tests intégrations IDS
@@ -103,6 +129,9 @@ jobs:
       - name: Tester les indicateurs du dashboard
         working-directory: frontend
         run: npm test
+      - name: Auditer les dépendances frontend
+        working-directory: frontend
+        run: npm audit --audit-level=moderate
 
   docker-compose:
     name: Validation Docker Compose

@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from "react";
+import { API_URL, apiFetch as fetch } from './api';
+import MfaPanel from './MfaPanel';
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 import "./alerts.css";
@@ -20,7 +22,6 @@ import InterfaceIcon from "./InterfaceIcon";
 import OverviewDashboard from "./OverviewDashboard";
 import "./experience.css";
 
-const API_URL = (import.meta.env.VITE_API_URL || window.location.origin).replace(/\/$/, "");
 const AUTO_REFRESH_MS = 10_000;
 const labels = { unknown: "En attente", online: "Opérationnel", warning: "Attention", critical: "Critique" };
 
@@ -75,7 +76,10 @@ function invitationTokenFromHash() {
 }
 
 function App() {
-  const [sessionToken, setSessionToken] = useState(() => localStorage.getItem("cyberpme_session") || "");
+  const [sessionToken, setSessionToken] = useState(() => {
+    localStorage.removeItem('cyberpme_session');
+    return 'cookie'; // Presence is checked with /auth/me, never stored in JS.
+  });
   const [currentUser, setCurrentUser] = useState(null);
   const [theme, setTheme] = useState(() => localStorage.getItem("cyberpme_theme") || "dark");
   const [activePage, setActivePage] = useState(pageFromHash);
@@ -151,8 +155,7 @@ function App() {
   }, [sessionToken]);
 
   function authenticated(session) {
-    localStorage.setItem("cyberpme_session", session.access_token);
-    setSessionToken(session.access_token);
+    setSessionToken('cookie');
   }
 
   async function logout() {
@@ -186,6 +189,7 @@ function App() {
   }
   if (sessionToken && !currentUser) return <div className="session-loading" role="status"><InterfaceIcon name="refresh" className="is-spinning"/><p>Ouverture de votre espace…</p></div>;
   if (!sessionToken) return <LoginPage apiUrl={API_URL} onAuthenticated={authenticated}/>;
+  if (currentUser?.mfa_setup_required) return <main className="login-screen"><section className="login-card"><h1>Sécuriser votre compte</h1><p>L’authentification à deux facteurs est obligatoire avant d’accéder aux données.</p><MfaPanel apiUrl={API_URL} onReconnect={passwordChanged}/><button className="secondary-button" onClick={logout}>Se déconnecter</button></section></main>;
 
   let page;
   if (activePage === "servers") page = <ServersPage servers={servers} error={error}/>;

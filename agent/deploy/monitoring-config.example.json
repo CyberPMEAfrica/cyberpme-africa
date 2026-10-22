@@ -1,0 +1,10 @@
+{
+  "api_url": "https://cyberpme-demo-api.vercel.app",
+  "name": "VPS pilote",
+  "hostname": "replace-with-unique-hostname",
+  "interval": 30,
+  "mode": "monitoring",
+  "enrollment_token": "replace-with-one-time-token-from-client-organization",
+  "state_path": "/var/lib/cyberpme/agent-state.json",
+  "operations": { "enabled": false }
+}

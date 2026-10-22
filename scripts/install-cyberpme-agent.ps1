@@ -4,26 +4,32 @@
 param(
     [Parameter(Mandatory = $true)][string]$ApiUrl,
     [Parameter(Mandatory = $true)][string]$EnrollmentToken,
-    [string]$Name = $env:COMPUTERNAME
+    [Parameter(Mandatory = $true)][ValidatePattern('^[a-fA-F0-9]{40}$')][string]$SourceRevision,
+    [string]$Name = $env:COMPUTERNAME,
+    [ValidateSet('monitoring', 'network', 'managed')][string]$Mode = 'monitoring'
 )
 $ErrorActionPreference = 'Stop'
 $apiUri = [uri]$ApiUrl
 if ($apiUri.Scheme -ne 'https' -or $apiUri.UserInfo -or $apiUri.Query -or $apiUri.Fragment) {
-    throw 'Utilisez l’adresse HTTPS de votre API CyberPME.'
+    throw 'Utilisez une adresse HTTPS pour votre API CyberPME.'
 }
 $agentRoot = Join-Path $env:ProgramData 'CyberPME'
 New-Item -ItemType Directory -Path $agentRoot -Force | Out-Null
 # Credentials and executable files must not be writable by ordinary users.
 & icacls.exe $agentRoot /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
-if ($LASTEXITCODE -ne 0) { throw 'Impossible de protéger le dossier CyberPME.' }
+if ($LASTEXITCODE -ne 0) { throw 'Impossible de proteger le dossier CyberPME.' }
+if ($Mode -ne 'monitoring') {
+    & icacls.exe $agentRoot /remove:g '*S-1-5-19' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Impossible de retirer les anciens droits de monitoring.' }
+}
 
 function Invoke-Checked {
     param([string]$Executable, [string[]]$Arguments)
     & $Executable @Arguments
-    if ($LASTEXITCODE -ne 0) { throw "Échec de $Executable (code $LASTEXITCODE)." }
+    if ($LASTEXITCODE -ne 0) { throw "Echec de $Executable (code $LASTEXITCODE)." }
 }
 
-Write-Host '1/4 - Préparation de Python et Nmap'
+Write-Host '1/4 - Preparation de Python et Nmap'
 $pythonPath = Join-Path $env:ProgramFiles 'Python312\python.exe'
 if (-not (Test-Path -LiteralPath $pythonPath)) {
     if (-not (Get-Command winget.exe -ErrorAction SilentlyContinue)) {
@@ -31,34 +37,45 @@ if (-not (Test-Path -LiteralPath $pythonPath)) {
     }
     Invoke-Checked 'winget.exe' @('install', '--id', 'Python.Python.3.12', '--exact', '--scope', 'machine', '--accept-source-agreements', '--accept-package-agreements')
 }
-if (-not (Test-Path -LiteralPath $pythonPath)) { throw 'Python 3.12 doit être installé dans Program Files\Python312.' }
+if (-not (Test-Path -LiteralPath $pythonPath)) { throw 'Python 3.12 doit etre installe dans Program Files\Python312.' }
+if ($Mode -ne 'monitoring') {
 $nmapCandidates = @((Join-Path ${env:ProgramFiles(x86)} 'Nmap\nmap.exe'), (Join-Path $env:ProgramFiles 'Nmap\nmap.exe'))
 $nmapPath = $nmapCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 if (-not $nmapPath) {
     if (-not (Get-Command winget.exe -ErrorAction SilentlyContinue)) { throw 'Installez Nmap et Npcap depuis https://nmap.org/download puis relancez.' }
-    Write-Host 'Validez les fenêtres de l’installateur Nmap et conservez Npcap sélectionné.'
+    Write-Host 'Validez les fenetres du programme Nmap et conservez Npcap selectionne.'
     Invoke-Checked 'winget.exe' @('install', '--id', 'Insecure.Nmap', '--exact', '--interactive', '--accept-source-agreements', '--accept-package-agreements')
     $nmapPath = $nmapCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 }
 if (-not $nmapPath) { throw 'Nmap est absent. Terminez son installation puis relancez.' }
 Invoke-Checked $nmapPath @('--version')
+}
 
 Write-Host '2/4 - Installation de CyberPME'
 $staging = Join-Path $agentRoot ('setup-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $staging | Out-Null
 $archive = Join-Path $staging 'source.zip'
-Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/CyberPMEAfrica/cyberpme-africa/archive/refs/heads/main.zip' -OutFile $archive
+Invoke-WebRequest -UseBasicParsing -Uri ('https://github.com/CyberPMEAfrica/cyberpme-africa/archive/' + $SourceRevision + '.zip') -OutFile $archive
 Expand-Archive -LiteralPath $archive -DestinationPath $staging
 $venv = Join-Path $agentRoot 'venv'
 $agentPython = Join-Path $venv 'Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $agentPython)) { Invoke-Checked $pythonPath @('-m', 'venv', $venv) }
 $existingTask = Get-ScheduledTask -TaskName 'CyberPME Agent' -ErrorAction SilentlyContinue
 if ($existingTask) { Stop-ScheduledTask -TaskName 'CyberPME Agent' }
-Invoke-Checked $agentPython @('-m', 'pip', 'install', '--upgrade', (Join-Path $staging 'cyberpme-africa-main\agent'))
+Invoke-Checked $agentPython @('-m', 'pip', 'install', '--upgrade', (Join-Path $staging ('cyberpme-africa-' + $SourceRevision + '\agent')))
 
 Write-Host '3/4 - Association avec votre organisation'
 $configPath = Join-Path $agentRoot 'agent-config.json'
 $statePath = Join-Path $agentRoot 'agent-state.json'
+if ($Mode -eq 'monitoring') {
+    & icacls.exe $agentRoot /grant:r '*S-1-5-19:(OI)(CI)RX' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Impossible de preparer le compte de monitoring.' }
+    $stateDirectory = Join-Path $agentRoot 'monitor-state'
+    New-Item -ItemType Directory -Path $stateDirectory -Force | Out-Null
+    & icacls.exe $stateDirectory /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-19:(OI)(CI)F' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Impossible de proteger le dossier de donnees.' }
+    $statePath = Join-Path $stateDirectory 'agent-state.json'
+}
 $config = @{}
 if (Test-Path -LiteralPath $configPath) {
     $previous = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
@@ -69,25 +86,32 @@ $config.name = $Name
 $config.interval = 30
 $config.enrollment_token = $EnrollmentToken
 $config.state_path = $statePath
+$config.mode = $Mode
+if ($Mode -ne 'managed') { $config.operations = @{ enabled = $false } }
 $config | ConvertTo-Json | Set-Content -LiteralPath $configPath -Encoding UTF8
 Invoke-Checked $agentPython @('-m', 'cyberpme_agent.main', '--config', $configPath, '--register-only')
 
-Write-Host '4/4 - Démarrage automatique'
+Write-Host '4/4 - Demarrage automatique'
 $runner = Join-Path $agentRoot 'run-agent.ps1'
 @'
 $agentRoot = Join-Path $env:ProgramData 'CyberPME'
-$log = Join-Path $agentRoot 'agent.log'
+$config = Get-Content -LiteralPath (Join-Path $agentRoot 'agent-config.json') -Raw | ConvertFrom-Json
+$log = Join-Path (Split-Path -Parent $config.state_path) 'agent.log'
 if ((Test-Path -LiteralPath $log) -and (Get-Item -LiteralPath $log).Length -gt 10MB) {
-    Move-Item -LiteralPath $log -Destination (Join-Path $agentRoot 'agent.previous.log') -Force
+    Move-Item -LiteralPath $log -Destination (Join-Path (Split-Path -Parent $log) 'agent.previous.log') -Force
 }
 & (Join-Path $agentRoot 'venv\Scripts\python.exe') -u -m cyberpme_agent.main --config (Join-Path $agentRoot 'agent-config.json') *>> $log
 exit $LASTEXITCODE
 '@ | Set-Content -LiteralPath $runner -Encoding UTF8
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + $runner + '"')
 $trigger = New-ScheduledTaskTrigger -AtStartup
-$principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+$principal = if ($Mode -eq 'monitoring') {
+    New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\LOCAL SERVICE' -LogonType ServiceAccount -RunLevel Limited
+} else {
+    New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+}
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 Register-ScheduledTask -TaskName 'CyberPME Agent' -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
 Start-ScheduledTask -TaskName 'CyberPME Agent'
-Write-Host 'Installation terminée. Revenez dans Scanner réseau et actualisez dans 30 secondes.'
-Write-Host ('Journal : ' + (Join-Path $agentRoot 'agent.log'))
+Write-Host 'Installation terminee. Revenez dans le SaaS et actualisez dans 30 secondes.'
+Write-Host ('Journal : ' + (Join-Path (Split-Path -Parent $statePath) 'agent.log'))

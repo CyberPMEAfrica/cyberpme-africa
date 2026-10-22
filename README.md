@@ -2,12 +2,25 @@
 
 Prototype de supervision simple destiné aux PME africaines.
 
+## Sécurité avant connexion d’un client
+
+Le socle de durcissement (agent monitoring seul, MFA, gestion des identités,
+sessions navigateur protégées et dépendances contrôlées) est documenté dans
+[la baseline sécurité](docs/security/SECURITY-BASELINE.md).
+Configurer notamment la clé de chiffrement MFA avant une publication de production.
+La [matrice des référentiels](docs/security/ALIGNEMENT-REFERENTIELS.md) décrit les
+rapprochements et les limites ; aucune certification PCI DSS ou ISO n’est revendiquée.
+La recette prévue est [Ubuntu Server 24.04.2, puis Debian 12](docs/security/PILOTE-UBUNTU-DEBIAN.md).
+
 ## Démarrage
 
 Ouvrez Docker Desktop, puis lancez :
 
+Avant le premier démarrage, renseignez les valeurs de `.env`, dont une clé Fernet
+`MFA_ENCRYPTION_KEY` privée. `SECURE_COOKIES=false` est réservé au HTTP local.
+
 ```powershell
-Copy-Item .env.example .env
+if (-not (Test-Path -LiteralPath .env)) { Copy-Item .env.example .env }
 docker compose up --build
 ```
 

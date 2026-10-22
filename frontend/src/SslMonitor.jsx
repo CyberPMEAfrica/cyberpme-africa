@@ -93,3 +93,4 @@ export default function SslMonitor({ apiUrl, token, checks, currentUser, onCreat
     </section>
   );
 }
+import { apiFetch as fetch } from './api';

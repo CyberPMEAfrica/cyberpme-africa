@@ -4,9 +4,10 @@ import hashlib
 import hmac
 import secrets
 import ssl
+import os
 from urllib.parse import quote
 from uuid import UUID
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from sqlalchemy import delete, select, update
@@ -65,10 +66,21 @@ from app.schemas import (
 )
 from app.ssl_monitor import inspect_certificate, validate_public_hostname
 from app.managed_actions import install_routes as install_managed_routes
+from app.security import (cookie_name, PairingPolicy, browser_session, charge_auth_attempt,
+    check_agent_scope, enforce_mfa_setup, supplied_session, validate_browser_origin,
+    verify_login_mfa, install_routes as install_security_routes)
+from app.security_models import AccountSecurity, AgentSecurity, EnrollmentPolicy
+
+_DUMMY_PASSWORD_HASH = hash_password("Non-account-placeholder-password-2026")
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    if os.getenv("VERCEL_ENV") == "preview" and os.getenv("PREVIEW_DATABASE_ISOLATED") != "true":
+        raise RuntimeError("Preview refusée : configurer une base isolée et PREVIEW_DATABASE_ISOLATED=true avant tout démarrage.")
+    if os.getenv("VERCEL_ENV") == "production" or os.getenv("APP_ENV") == "production":
+        from app.security_preflight import validate_production_security
+        validate_production_security()
     with next(get_db()) as db:
         organization = db.scalar(select(Organization).where(Organization.slug == settings.bootstrap_organization_slug))
         if organization is None:
@@ -78,7 +90,7 @@ async def lifespan(_: FastAPI):
             )
             db.add(organization)
             db.flush()
-        organization.enrollment_key_hash = token_hash(settings.agent_enrollment_key)
+        organization.enrollment_key_hash = token_hash(settings.agent_enrollment_key) if settings.allow_legacy_enrollment and settings.agent_enrollment_key else None
         db.commit()
     if settings.bootstrap_admin_email and settings.bootstrap_admin_password:
         with next(get_db()) as db:
@@ -165,13 +177,33 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    try:
+        if request.url.path.startswith("/api/v1/"):
+            validate_browser_origin(request)
+    except HTTPException as exc:
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    if request.url.path.startswith("/api/v1/"):
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+    return response
+
+
 def require_user(
+    request: Request,
     authorization: str | None = Header(default=None),
     db: Session = Depends(get_db),
 ) -> tuple[User, Organization]:
-    if not authorization or not authorization.startswith("Bearer "):
+    supplied = supplied_session(request, authorization)
+    if not supplied:
         raise HTTPException(status_code=401, detail="Authentification requise.")
-    supplied = authorization.removeprefix("Bearer ").strip()
     session = db.scalar(select(UserSession).where(UserSession.token_hash == hash_session_token(supplied)))
     now = datetime.now(timezone.utc)
     if session is None:
@@ -189,6 +221,7 @@ def require_user(
     organization = db.get(Organization, user.organization_id)
     if organization is None:
         raise HTTPException(status_code=401, detail="Organisation indisponible.")
+    enforce_mfa_setup(db, user, request)
     return user, organization
 
 
@@ -200,10 +233,12 @@ def server_response(db: Session, server: Server) -> ServerRead:
         last_seen = last_seen.replace(tzinfo=timezone.utc)
     connected = bool(
         server.credential
-        and server.network_scan_capable
         and last_seen
         and last_seen >= datetime.now(timezone.utc) - timedelta(minutes=5)
     )
+    profile = db.get(AgentSecurity, server.id)
+    if not profile or profile.revoked_at or (profile.expires_at.replace(tzinfo=timezone.utc) if profile.expires_at.tzinfo is None else profile.expires_at) <= datetime.now(timezone.utc):
+        connected = False
     return data.model_copy(update={
         "latest_metric": MetricRead.model_validate(latest) if latest else None,
         "agent_connected": connected,
@@ -214,12 +249,13 @@ def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-def require_agent(server: Server, authorization: str | None) -> None:
+def require_agent(server: Server, authorization: str | None, scope: str = "monitoring") -> None:
     if not authorization or not authorization.startswith("Bearer ") or server.credential is None:
         raise HTTPException(status_code=401, detail="Jeton agent requis.")
     supplied_hash = token_hash(authorization.removeprefix("Bearer ").strip())
     if not hmac.compare_digest(supplied_hash, server.credential.token_hash):
         raise HTTPException(status_code=401, detail="Jeton agent invalide.")
+    check_agent_scope(server, scope)
 
 
 def backup_response(db: Session, check: BackupCheck) -> BackupCheckRead:
@@ -325,7 +361,8 @@ def health() -> dict[str, str]:
 
 
 @app.post("/api/v1/auth/login", response_model=SessionRead)
-def login(payload: LoginRequest, db: Session = Depends(get_db)) -> SessionRead:
+def login(payload: LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)) -> SessionRead:
+    charge_auth_attempt(db, request, payload.organization_slug + ":" + payload.email)
     organization = db.scalar(select(Organization).where(Organization.slug == payload.organization_slug.lower()))
     user = None
     if organization:
@@ -369,10 +406,21 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> SessionRead:
             user.role = "owner"
             user.is_active = True
             db.execute(delete(UserSession).where(UserSession.user_id == user.id))
-    if user is None or not user.is_active or not verify_password(payload.password, user.password_hash):
+    password_valid = verify_password(payload.password, user.password_hash if user else _DUMMY_PASSWORD_HASH)
+    if user is None or not user.is_active or not password_valid:
+        if organization:
+            record_audit(db, organization, "anonymous", "anonymous", "auth.login_failed", "organization", organization.id)
+            db.commit()
         raise HTTPException(status_code=401, detail="Identifiants invalides.")
+    try:
+        verify_login_mfa(db, user, payload.mfa_code)
+    except HTTPException as exc:
+        if exc.detail != "MFA_REQUIRED":
+            record_audit(db, organization, user.email, user.role, "auth.mfa_failed", "user", user.id)
+            db.commit()
+        raise
     raw_token, token_digest = issue_session_token()
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=12)
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=settings.session_hours)
     db.add(UserSession(user_id=user.id, token_hash=token_digest, expires_at=expires_at))
     record_audit(
         db,
@@ -384,7 +432,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> SessionRead:
         user.id,
     )
     db.commit()
-    return SessionRead(access_token=raw_token, expires_at=expires_at)
+    return SessionRead(access_token=browser_session(request, response, raw_token, expires_at), expires_at=expires_at)
 
 
 @app.post("/api/v1/auth/recover-bootstrap-owner", status_code=status.HTTP_204_NO_CONTENT)
@@ -448,7 +496,7 @@ def recover_bootstrap_owner(
 
 
 @app.get("/api/v1/auth/me", response_model=CurrentUserRead)
-def current_user(context: tuple[User, Organization] = Depends(require_user)) -> CurrentUserRead:
+def current_user(context: tuple[User, Organization] = Depends(require_user), db: Session = Depends(get_db)) -> CurrentUserRead:
     user, organization = context
     return CurrentUserRead(
         id=user.id,
@@ -457,6 +505,7 @@ def current_user(context: tuple[User, Organization] = Depends(require_user)) -> 
         email=user.email,
         role=user.role,
         theme=user.theme,
+        mfa_setup_required=settings.mfa_required and not bool((profile := db.get(AccountSecurity, user.id)) and profile.enabled),
     )
 
 
@@ -494,12 +543,13 @@ def update_user_preferences(
 
 @app.post("/api/v1/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
 def logout(
+    request: Request,
     authorization: str | None = Header(default=None),
     context: tuple[User, Organization] = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> Response:
     user, organization = context
-    token = authorization.removeprefix("Bearer ").strip() if authorization else ""
+    token = supplied_session(request, authorization)
     session = db.scalar(select(UserSession).where(UserSession.token_hash == hash_session_token(token)))
     if session:
         db.delete(session)
@@ -513,7 +563,9 @@ def logout(
         user.id,
     )
     db.commit()
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
+    response.delete_cookie(cookie_name(), path="/", secure=settings.secure_cookies, httponly=True, samesite="lax")
+    return response
 
 
 @app.post("/api/v1/auth/change-password", status_code=status.HTTP_204_NO_CONTENT)
@@ -824,6 +876,8 @@ def preview_invitation(
 @app.post("/api/v1/invitations/accept", response_model=SessionRead)
 def accept_invitation(
     payload: InvitationAccept,
+    request: Request,
+    response: Response,
     db: Session = Depends(get_db),
 ) -> SessionRead:
     invitation, organization = get_valid_invitation(payload.token, db)
@@ -851,7 +905,7 @@ def accept_invitation(
         user.is_active = True
     invitation.accepted_at = datetime.now(timezone.utc)
     raw_session, session_digest = issue_session_token()
-    session_expires_at = datetime.now(timezone.utc) + timedelta(hours=12)
+    session_expires_at = datetime.now(timezone.utc) + timedelta(hours=settings.session_hours)
     db.add(
         UserSession(
             user_id=user.id,
@@ -874,7 +928,7 @@ def accept_invitation(
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail="Un compte existe dÃ©jÃ  pour cette adresse.") from exc
-    return SessionRead(access_token=raw_session, expires_at=session_expires_at)
+    return SessionRead(access_token=browser_session(request, response, raw_session, session_expires_at), expires_at=session_expires_at)
 
 
 @app.post("/api/v1/servers", response_model=ServerRead, status_code=status.HTTP_201_CREATED)
@@ -909,6 +963,7 @@ def list_servers(
 
 @app.post("/api/v1/agent-enrollment-tokens", response_model=AgentEnrollmentCreated, status_code=status.HTTP_201_CREATED)
 def create_agent_enrollment_token(
+    payload: PairingPolicy = Body(default=PairingPolicy()),
     context: tuple[User, Organization] = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> AgentEnrollmentCreated:
@@ -924,6 +979,7 @@ def create_agent_enrollment_token(
     )
     db.add(enrollment)
     db.flush()
+    db.add(EnrollmentPolicy(enrollment_id=enrollment.id, mode=payload.mode))
     record_audit(
         db,
         organization,
@@ -935,7 +991,7 @@ def create_agent_enrollment_token(
         {"expires_at": enrollment.expires_at.isoformat()},
     )
     db.commit()
-    return AgentEnrollmentCreated(enrollment_token=raw_token, expires_at=enrollment.expires_at)
+    return AgentEnrollmentCreated(enrollment_token=raw_token, expires_at=enrollment.expires_at, mode=payload.mode)
 
 
 @app.post("/api/v1/agents/register", response_model=AgentRegistrationRead)
@@ -958,13 +1014,15 @@ def register_agent(
                 enrollment = None
         if enrollment is not None and hmac.compare_digest(supplied_hash, enrollment.token_hash):
             organization = db.get(Organization, enrollment.organization_id)
-    elif x_enrollment_key:
+    elif x_enrollment_key and settings.allow_legacy_enrollment:
         supplied_hash = token_hash(x_enrollment_key)
         organization = db.scalar(select(Organization).where(Organization.enrollment_key_hash == supplied_hash))
         if organization is not None and not hmac.compare_digest(supplied_hash, organization.enrollment_key_hash or ""):
             organization = None
     if organization is None:
         raise HTTPException(status_code=401, detail="Jeton d’installation invalide ou expiré.")
+    policy = db.get(EnrollmentPolicy, enrollment.id) if enrollment else None
+    mode = policy.mode if policy else ("network" if settings.allow_legacy_enrollment and payload.network_scan_capable else "monitoring")
     if enrollment is not None:
         consumed = db.execute(update(AgentEnrollmentToken).where(
             AgentEnrollmentToken.id == enrollment.id,
@@ -987,6 +1045,7 @@ def register_agent(
         server.network_scan_capable = payload.network_scan_capable
     server.last_seen_at = datetime.now(timezone.utc)
     server.status = "online"
+    server.network_scan_capable = mode in {"network", "managed"} and payload.network_scan_capable
     raw_token = secrets.token_urlsafe(32)
     if server.credential is None:
         server.credential = AgentCredential(token_hash=token_hash(raw_token))
@@ -995,8 +1054,39 @@ def register_agent(
         server.credential.created_at = datetime.now(timezone.utc)
     if enrollment is not None:
         enrollment.used_at = datetime.now(timezone.utc)
+    profile = db.get(AgentSecurity, server.id)
+    if profile is None:
+        profile = AgentSecurity(server_id=server.id)
+        db.add(profile)
+    profile.mode = mode
+    profile.revoked_at = None
+    profile.rotated_at = datetime.now(timezone.utc)
+    profile.expires_at = datetime.now(timezone.utc) + timedelta(days=settings.agent_token_days)
+    record_audit(db, organization, enrollment.created_by_email if enrollment else "legacy", "admin", "agent.paired", "server", server.id, {"mode": mode})
     db.commit()
-    return AgentRegistrationRead(server_id=server.id, agent_token=raw_token)
+    return AgentRegistrationRead(server_id=server.id, agent_token=raw_token, mode=mode, expires_at=profile.expires_at)
+
+
+@app.post("/api/v1/servers/{server_id}/agent-credential/rotate", response_model=AgentRegistrationRead)
+def rotate_agent_credential(server_id: UUID, authorization: str | None = Header(default=None), db: Session = Depends(get_db)):
+    server = db.get(Server, server_id)
+    if server is None:
+        raise HTTPException(404, "Agent introuvable.")
+    require_agent(server, authorization)
+    profile = db.get(AgentSecurity, server.id)
+    raw = secrets.token_urlsafe(32)
+    # Atomic compare-and-swap: a concurrent rotation cannot silently win twice.
+    previous = server.credential.token_hash
+    changed = db.execute(update(AgentCredential).where(AgentCredential.server_id == server.id, AgentCredential.token_hash == previous).values(token_hash=token_hash(raw)))
+    if changed.rowcount != 1:
+        db.rollback()
+        raise HTTPException(409, "Rotation concurrente. Réassociez l’agent si nécessaire.")
+    profile.rotated_at = datetime.now(timezone.utc)
+    profile.expires_at = profile.rotated_at + timedelta(days=settings.agent_token_days)
+    organization = db.get(Organization, server.organization_id)
+    record_audit(db, organization, "agent:" + str(server.id), "agent", "agent.token_rotated", "server", server.id)
+    db.commit()
+    return AgentRegistrationRead(server_id=server.id, agent_token=raw, mode=profile.mode, expires_at=profile.expires_at)
 
 
 ALERT_RULES = {
@@ -1068,7 +1158,10 @@ def create_network_scan(
     if active_scan is not None:
         raise HTTPException(status_code=409, detail="Un audit réseau est déjà en cours.")
     freshness = datetime.now(timezone.utc) - timedelta(minutes=5)
-    agent_query = select(Server).join(AgentCredential).where(
+    agent_query = select(Server).join(AgentCredential).join(AgentSecurity, AgentSecurity.server_id == Server.id).where(
+        AgentSecurity.mode.in_(("network", "managed")),
+        AgentSecurity.revoked_at.is_(None),
+        AgentSecurity.expires_at > datetime.now(timezone.utc),
         Server.organization_id == organization.id,
         Server.network_scan_capable.is_(True),
         Server.last_seen_at.is_not(None),
@@ -1122,8 +1215,7 @@ def claim_network_scan_job(
     server = db.get(Server, server_id)
     if server is None:
         raise HTTPException(status_code=404, detail="Agent introuvable.")
-    require_agent(server, authorization)
-    server.network_scan_capable = True
+    require_agent(server, authorization, "network")
     expire_network_scan_jobs(db, server.organization_id)
     server.last_seen_at = datetime.now(timezone.utc)
     scan = db.scalar(
@@ -1159,7 +1251,7 @@ def complete_network_scan_job(
     server = db.get(Server, server_id)
     if server is None:
         raise HTTPException(status_code=404, detail="Agent introuvable.")
-    require_agent(server, authorization)
+    require_agent(server, authorization, "network")
     scan = db.scalar(
         select(NetworkScan).where(NetworkScan.id == scan_id, NetworkScan.agent_server_id == server.id)
     )
@@ -1727,3 +1819,4 @@ def create_metric(
 
 
 install_managed_routes(app, require_user, require_agent, require_role, record_audit)
+install_security_routes(app, require_user, require_role, record_audit)

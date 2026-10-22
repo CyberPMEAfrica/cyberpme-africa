@@ -10,7 +10,7 @@ const statusLabels = {
 
 export default function NetworkScanner({ apiUrl, token, scans, servers = [], currentUser, onCreated }) {
   const [selectedAgent, setSelectedAgent] = useState("");
-  const connectedAgents = servers.filter((server) => server.agent_connected);
+  const connectedAgents = servers.filter((server) => server.agent_connected && server.network_scan_capable);
   const agentId = selectedAgent || connectedAgents[0]?.id || "";
   const agentAvailable = connectedAgents.some((agent) => agent.id === agentId);
   const [target, setTarget] = useState("192.168.1.0/24");
@@ -140,3 +140,4 @@ export default function NetworkScanner({ apiUrl, token, scans, servers = [], cur
     </section>
   );
 }
+import { apiFetch as fetch } from './api';

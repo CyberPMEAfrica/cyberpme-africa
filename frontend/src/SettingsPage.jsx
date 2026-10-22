@@ -302,6 +302,7 @@ export default function SettingsPage({
           <h3>Connecter vos équipements</h3>
           <p>Un agent local remonte les mesures du PC et exécute les audits sur son réseau.</p>
           <AgentSetup apiUrl={apiUrl} token={token} currentUser={currentUser} />
+          <AgentSecurity apiUrl={apiUrl} currentUser={currentUser}/>
           <p><a href="#/scanner">Voir les agents disponibles dans Scanner réseau</a></p>
         </div>}
         {activeTab === "organization" && (
@@ -421,6 +422,7 @@ export default function SettingsPage({
           </div>
         )}
 
+        {activeTab === "security" && <MfaPanel apiUrl={apiUrl} onReconnect={onPasswordChanged}/>}
         {activeTab === "security" && (
           <form className="settings-panel settings-form-narrow" onSubmit={changePassword}>
             <div><p className="eyebrow">SÉCURITÉ DU COMPTE</p><h3>Changer mon mot de passe</h3></div>
@@ -505,3 +507,6 @@ export default function SettingsPage({
     </section>
   );
 }
+import { apiFetch as fetch } from './api';
+import MfaPanel from './MfaPanel';
+import AgentSecurity from './AgentSecurity';

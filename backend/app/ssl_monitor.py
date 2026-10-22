@@ -43,11 +43,15 @@ def name_value(name: x509.Name, oid: x509.ObjectIdentifier) -> str | None:
 
 
 def inspect_certificate(hostname: str, port: int) -> dict:
+    # Pin a validated numeric address for BOTH connections; preserve hostname for
+    # TLS SNI and hostname verification. A second DNS lookup cannot switch to LAN.
+    hostname, addresses = validate_public_hostname(hostname, port)
+    address = addresses[0]
     now = datetime.now(timezone.utc)
     unverified_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     unverified_context.check_hostname = False
     unverified_context.verify_mode = ssl.CERT_NONE
-    with socket.create_connection((hostname, port), timeout=10) as raw_socket:
+    with socket.create_connection((address, port), timeout=10) as raw_socket:
         with unverified_context.wrap_socket(raw_socket, server_hostname=hostname) as tls_socket:
             certificate = x509.load_der_x509_certificate(tls_socket.getpeercert(binary_form=True))
             tls_version = tls_socket.version()
@@ -60,7 +64,7 @@ def inspect_certificate(hostname: str, port: int) -> dict:
     verification_error = None
     try:
         verified_context = ssl.create_default_context()
-        with socket.create_connection((hostname, port), timeout=10) as raw_socket:
+        with socket.create_connection((address, port), timeout=10) as raw_socket:
             with verified_context.wrap_socket(raw_socket, server_hostname=hostname):
                 pass
     except ssl.SSLCertVerificationError as exc:

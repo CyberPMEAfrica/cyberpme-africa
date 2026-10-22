@@ -30,6 +30,8 @@ def exclusive_worker(path):
 
 
 def process_action(config, server_id, agent_token, request, executor=perform):
+    if config.mode != 'managed' or config.operations.get('enabled') is not True:
+        return False
     receipt = config.state_path.with_suffix('.operation.json')
     headers = {'Authorization':'Bearer '+agent_token}
     base = f'{config.api_url}/api/v1/servers/{server_id}/managed-actions'
@@ -62,6 +64,8 @@ def process_action(config, server_id, agent_token, request, executor=perform):
 
 def process_schedule(config, server_id, agent_token, request, executor=perform, clock=time.time):
     """Schedules are explicitly approved in the root/admin-owned local policy."""
+    if config.mode != 'managed' or config.operations.get('enabled') is not True:
+        return False
     path = config.state_path.with_suffix('.schedule.json')
     outbox = config.state_path.with_suffix('.schedule-report.json')
     if outbox.exists():

@@ -135,6 +135,8 @@ def install_routes(app, require_user, require_agent, require_role, record_audit)
         server = db.scalar(select(Server).where(Server.id == payload.server_id, Server.organization_id == org.id))
         if not server or not server.credential:
             raise HTTPException(404, 'Agent introuvable.')
+        from app.security import check_agent_scope
+        check_agent_scope(server, 'managed')
         source = None
         if payload.kind == 'firewall_block':
             event = db.scalar(select(SecurityEvent).where(SecurityEvent.id == payload.event_id, SecurityEvent.server_id == server.id))
@@ -198,7 +200,7 @@ def install_routes(app, require_user, require_agent, require_role, record_audit)
         server = db.get(Server, server_id)
         if not server:
             raise HTTPException(404, 'Agent introuvable.')
-        require_agent(server, authorization)
+        require_agent(server, authorization, "managed")
         return server
 
     @router.get('/servers/{server_id}/managed-actions/next', response_model=ActionRead | None)

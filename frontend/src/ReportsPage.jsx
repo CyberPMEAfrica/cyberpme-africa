@@ -42,3 +42,4 @@ export default function ReportsPage({ apiUrl, token, scans }) {
     </section>
   );
 }
+import { apiFetch as fetch } from './api';

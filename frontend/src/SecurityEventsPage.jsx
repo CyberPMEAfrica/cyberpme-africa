@@ -246,3 +246,4 @@ export default function SecurityEventsPage({ apiUrl, token, events, connectors, 
     </div>
   </section>;
 }
+import { apiFetch as fetch } from './api';

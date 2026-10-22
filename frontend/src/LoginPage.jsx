@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { apiFetch as fetch } from './api';
 import BrandLogo from "./BrandLogo";
 import InterfaceIcon from './InterfaceIcon';
 
@@ -9,6 +10,8 @@ export default function LoginPage({ apiUrl, onAuthenticated }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [passwordVisible, setPasswordVisible] = useState(false);
+  const [mfaRequired, setMfaRequired] = useState(false);
+  const [mfaCode, setMfaCode] = useState('');
 
   async function submit(event) {
     event.preventDefault();
@@ -17,10 +20,12 @@ export default function LoginPage({ apiUrl, onAuthenticated }) {
     try {
       const response = await fetch(`${apiUrl}/api/v1/auth/login`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ organization_slug: organization, email, password }),
+        body: JSON.stringify({ organization_slug: organization, email, password, mfa_code: mfaCode }),
       });
-      if (!response.ok) throw new Error(response.status === 401 || response.status === 422 ? 'Organisation, adresse e-mail ou mot de passe incorrect.' : 'Connexion momentanément indisponible. Réessayez dans un instant.');
-      onAuthenticated(await response.json());
+      const result = await response.json();
+      if (result.detail === 'MFA_REQUIRED') { setMfaRequired(true); return; }
+      if (!response.ok) throw new Error(response.status === 429 ? 'Trop de tentatives. Attendez 15 minutes avant de réessayer.' : mfaRequired ? 'Code MFA invalide, expiré ou déjà utilisé.' : 'Organisation, adresse e-mail ou mot de passe incorrect.');
+      onAuthenticated(result);
     } catch (error) {
       setError(error instanceof TypeError ? 'Le service est injoignable. Vérifiez votre connexion, puis réessayez.' : error.message);
     } finally {
@@ -37,6 +42,7 @@ export default function LoginPage({ apiUrl, onAuthenticated }) {
       <small id="organization-help" className="login-help">Utilisez l’identifiant fourni par votre administrateur.</small>
       <label>Adresse e-mail<input name="username" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="vous@entreprise.fr" autoComplete="username" required/></label>
       <div className="password-field"><label>Mot de passe<input name="password" type={passwordVisible ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" minLength="12" required/></label><button type="button" className="password-toggle" onClick={() => setPasswordVisible(!passwordVisible)} aria-label={passwordVisible ? 'Masquer le mot de passe' : 'Afficher le mot de passe'} aria-pressed={passwordVisible}><InterfaceIcon name="eye"/></button></div>
+      {mfaRequired && <><label>Code de l’application d’authentification ou code de secours<input value={mfaCode} onChange={e => setMfaCode(e.target.value)} autoComplete="one-time-code" aria-describedby="mfa-help" maxLength={64} autoFocus required/></label><small id="mfa-help">Un code déjà utilisé ne peut pas être réutilisé. Attendez le prochain code si nécessaire.</small></>}
       {error && <p className="login-error" role="alert">{error}</p>}
       <button disabled={loading} aria-busy={loading}><InterfaceIcon name={loading ? 'refresh' : 'arrow'} className={loading ? 'is-spinning' : ''}/>{loading ? "Connexion…" : "Se connecter"}</button>
     </form>

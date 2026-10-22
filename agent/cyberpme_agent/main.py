@@ -13,9 +13,26 @@ from ipaddress import IPv4Network, ip_network
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import Request, HTTPRedirectHandler, build_opener
+from urllib.parse import urlsplit
 
 import psutil
+
+
+class NoRedirects(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise RuntimeError("Redirection API refusée pour protéger le jeton agent.")
+
+
+urlopen = build_opener(NoRedirects()).open
+
+
+def validate_api_url(value: str):
+    parsed = urlsplit(value)
+    if parsed.username or parsed.password or parsed.query or parsed.fragment or not parsed.hostname:
+        raise ValueError("URL API invalide : aucun identifiant, paramètre ou fragment n’est accepté.")
+    if parsed.scheme != "https" and not (parsed.scheme == "http" and parsed.hostname in {"localhost", "127.0.0.1", "::1"}):
+        raise ValueError("HTTPS est obligatoire, sauf pour le développement sur la boucle locale.")
 
 
 class ApiError(RuntimeError):
@@ -54,6 +71,14 @@ class Config:
     state_path: Path = default_data_dir() / "agent-state.json"
     config_path: Path | None = None
     operations: dict = field(default_factory=dict)
+    mode: str = "monitoring"
+
+    def __post_init__(self):
+        validate_api_url(self.api_url)
+        if self.mode not in {"monitoring", "network", "managed"}:
+            raise ValueError("Mode agent inconnu.")
+        if self.mode != "managed" and self.operations.get("enabled") is True:
+            raise ValueError("Les opérations nécessitent le mode managed explicitement autorisé.")
 
     @classmethod
     def from_environment(cls, interval_override: int | None = None) -> "Config":
@@ -87,10 +112,12 @@ class Config:
             state_path=Path(configured_state) if configured_state else default_data_dir() / "agent-state.json",
             config_path=config_path,
             operations=stored.get("operations", {}),
+            mode=os.getenv("CYBERPME_AGENT_MODE", stored.get("mode", "monitoring")),
         )
 
 
 def request_json(method: str, url: str, payload: dict[str, Any] | None = None, headers: dict[str, str] | None = None) -> Any:
+    validate_api_url(url)
     data = json.dumps(payload).encode("utf-8") if payload is not None else None
     request = Request(url, data=data, method=method, headers={"Content-Type": "application/json", **(headers or {})})
     try:
@@ -149,7 +176,7 @@ def register_agent(config: Config) -> tuple[str, str]:
         raise RuntimeError("Un jeton d’installation CyberPME est requis lors du premier démarrage.")
     registration = request_json(
         "POST", f"{config.api_url}/api/v1/agents/register",
-        {"name": config.name, "hostname": config.hostname, "ip_address": discover_ip(), "network_scan_capable": True}, headers,
+        {"name": config.name, "hostname": config.hostname, "ip_address": discover_ip(), "network_scan_capable": config.mode in {"network", "managed"}}, headers,
     )
     save_state(config.state_path, registration["server_id"], registration["agent_token"])
     clear_one_time_token(config)
@@ -258,6 +285,8 @@ def run_network_scan(target: str) -> list[dict]:
 
 
 def process_scan_job(config: Config, server_id: str, agent_token: str) -> bool:
+    if config.mode not in {"network", "managed"}:
+        return False
     headers = {"Authorization": f"Bearer {agent_token}"}
     outbox = config.state_path.with_suffix(".result.json")
     if outbox.exists():
@@ -286,7 +315,7 @@ def process_scan_job(config: Config, server_id: str, agent_token: str) -> bool:
 
 
 def run(config: Config, once: bool) -> None:
-    print(f"CyberPME Agent 0.3.0 — {platform.system()} {platform.release()}")
+    print(f"CyberPME Agent 0.4.0 — {platform.system()} {platform.release()}")
     print(f"Serveur: {config.name} ({config.hostname}) | API: {config.api_url}")
     credentials = load_state(config.state_path)
     if credentials is None:
@@ -295,14 +324,15 @@ def run(config: Config, once: bool) -> None:
     else:
         print(f"Identité locale chargée — identifiant {credentials[0]}")
     server_id, agent_token = credentials
-    if config.operations.get('enabled') is True and not once:
+    print(f"Permissions locales : {config.mode}", flush=True)
+    if config.mode == "managed" and config.operations.get('enabled') is True and not once:
         from cyberpme_agent.operation_worker import start_worker
         start_worker(config, server_id, agent_token, request_json)
     backup_check_due = 0.0
     while True:
         try:
             send_once(config, server_id, agent_token)
-            while process_scan_job(config, server_id, agent_token):
+            while config.mode in {"network", "managed"} and process_scan_job(config, server_id, agent_token):
                 pass
             if config.backup_targets and time.monotonic() >= backup_check_due:
                 send_backup_checks(config, server_id, agent_token)
@@ -320,6 +350,7 @@ def main() -> None:
     parser.add_argument("--interval", type=int, help="Secondes entre deux cycles")
     parser.add_argument("--config", type=Path, help="Chemin du fichier de configuration JSON")
     parser.add_argument("--register-only", action="store_true", help="Associer ce PC sans lancer de tâche")
+    parser.add_argument("--rotate-token", action="store_true", help="Renouveler l’identité sans modifier les permissions")
     args = parser.parse_args()
     if args.interval is not None and args.interval < 10:
         parser.error("L’intervalle minimum est de 10 secondes.")
@@ -327,7 +358,15 @@ def main() -> None:
         config = Config.from_sources(args.config, args.interval)
         if config.interval < 10:
             raise ValueError("L’intervalle minimum est de 10 secondes.")
-        if args.register_only:
+        if args.rotate_token:
+            credentials = load_state(config.state_path)
+            if not credentials:
+                raise ValueError("Agent non associé.")
+            ident, token = credentials
+            result = request_json("POST", f"{config.api_url}/api/v1/servers/{ident}/agent-credential/rotate", headers={"Authorization": f"Bearer {token}"})
+            save_state(config.state_path, ident, result["agent_token"])
+            print("Jeton renouvelé. Redémarrez le service agent pour charger la nouvelle identité.")
+        elif args.register_only:
             register_agent(config)
         else:
             run(config, args.once)

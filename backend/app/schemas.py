@@ -29,6 +29,7 @@ class ServerRead(ServerCreate):
     last_seen_at: datetime | None
     latest_metric: MetricRead | None = None
     agent_connected: bool = False
+    network_scan_capable: bool = False
 
 
 class AlertRead(BaseModel):
@@ -53,11 +54,14 @@ class AgentRegistration(ServerCreate):
 class AgentRegistrationRead(BaseModel):
     server_id: UUID
     agent_token: str
+    mode: str = "monitoring"
+    expires_at: datetime | None = None
 
 
 class AgentEnrollmentCreated(BaseModel):
     enrollment_token: str
     expires_at: datetime
+    mode: str = "monitoring"
 
 
 class NetworkScanCreate(BaseModel):
@@ -221,6 +225,7 @@ class LoginRequest(BaseModel):
     organization_slug: str = Field(min_length=2, max_length=80)
     email: str = Field(min_length=5, max_length=254)
     password: str = Field(min_length=12, max_length=256)
+    mfa_code: str = Field(default="", max_length=64)
 
 
 class SessionRead(BaseModel):
@@ -236,6 +241,7 @@ class CurrentUserRead(BaseModel):
     email: str
     role: str
     theme: str
+    mfa_setup_required: bool = False
 
 
 class UserPreferenceUpdate(BaseModel):
