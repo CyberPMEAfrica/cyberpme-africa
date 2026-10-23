@@ -221,7 +221,7 @@ function App() {
   }
   if (sessionToken && !currentUser) return <div className="session-loading" role="status"><InterfaceIcon name="refresh" className="is-spinning"/><p>Ouverture de votre espace…</p></div>;
   if (!sessionToken) return <LoginPage apiUrl={API_URL} onAuthenticated={authenticated} logoutStatus={logoutStatus} onRetryLogout={logout}/>;
-  if (currentUser?.mfa_setup_required) return <main className="login-screen"><section className="login-card"><h1>Sécuriser votre compte</h1><p>L’authentification à deux facteurs est obligatoire avant d’accéder aux données.</p><MfaPanel apiUrl={API_URL} onReconnect={passwordChanged}/><button className="secondary-button" onClick={logout}>Se déconnecter</button></section></main>;
+  if (currentUser?.mfa_setup_required) return <main className="login-screen"><section className="login-card mfa-setup-card"><h1>Sécuriser votre compte</h1><p>L’authentification à deux facteurs est obligatoire avant d’accéder aux données.</p><MfaPanel apiUrl={API_URL} onReconnect={passwordChanged}/><button className="secondary-button" onClick={logout}>Se déconnecter</button></section></main>;
 
   let page;
   if (activePage === "servers") page = <ServersPage servers={servers} error={error}/>;

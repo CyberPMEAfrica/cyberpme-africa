@@ -20,6 +20,10 @@ Le développement doit être validé en préproduction avant bascule. Un audit i
 
 La MFA TOTP résiste au vol d’un mot de passe seul, mais n’est **pas résistante au phishing** comme une clé FIDO2/WebAuthn. Les secrets sont chiffrés en base, pas dans la mémoire du processus. La protection dépend de la garde séparée de la clé MFA.
 
+L’inscription propose un QR code et la saisie manuelle de la même clé. Le QR est généré localement en SVG depuis l’URI `otpauth` du backend, après confirmation du mot de passe ; aucun service externe de génération d’images n’est appelé. Son contenu n’est pas enregistré dans le stockage du navigateur et le QR disparaît après activation. Une réponse incompatible conserve la saisie manuelle sans interrompre le formulaire. Le QR et la clé sont des secrets : ne pas les partager ni les inclure dans une capture destinée au support.
+
+Parcours : préparer la MFA, scanner le QR avec son application d’authentification (ou saisir la clé), confirmer le code à six chiffres, conserver les codes de secours puis se reconnecter avec un nouveau code. Le test de lecture réelle du QR et de son retrait après activation est décrit dans `frontend/tests/MFA-QR.md`.
+
 La limitation applicative porte sur le compte (8 tentatives dans une fenêtre de 15 minutes), pour éviter de prendre l’adresse d’un proxy Vercel commun pour celle de tous les clients. Configurer et vérifier en plus des règles WAF par IP au point d’entrée de confiance pour les tentatives distribuées, le credential stuffing et les volumes abusifs. Ne pas faire confiance à un en-tête transmis arbitrairement par un client.
 
 L’installateur Windows de monitoring utilise LOCAL SERVICE, sans Nmap ; les modes réseau et administré restent privilégiés et exigent une activation explicite. Cette configuration doit encore être testée en installation réelle Windows. Les commandes de publication épinglent une révision Git complète, pas la branche mutable `main` ; conserver aussi les empreintes et la revue de la publication.
