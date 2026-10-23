@@ -11,6 +11,17 @@ _spec.loader.exec_module(_module)
 main = _module.main
 
 
+@pytest.fixture(autouse=True)
+def production_security_fixture(monkeypatch):
+    from cryptography.fernet import Fernet
+    values = dict(mfa_encryption_key=Fernet.generate_key().decode(), mfa_required=True,
+        secure_cookies=True, allow_legacy_enrollment=False, bootstrap_admin_force_sync=False,
+        bootstrap_admin_reset_password='', bootstrap_recovery_key='',
+        frontend_public_url='https://fixture.example', cors_origins='https://fixture.example')
+    for key, value in values.items():
+        monkeypatch.setattr(settings, key, value)
+
+
 def test_preview_never_connects(monkeypatch):
     monkeypatch.setenv('VERCEL_ENV', 'preview')
     monkeypatch.setattr(settings, 'database_url', 'invalid://must-not-connect')
@@ -27,7 +38,7 @@ def test_production_migrates_expected_revision_twice(tmp_path, monkeypatch):
     engine = create_engine(url)
     assert 'managed_actions' in inspect(engine).get_table_names()
     with engine.connect() as connection:
-        assert connection.execute(text('SELECT version_num FROM alembic_version')).scalar_one() == '20260924_0006'
+        assert connection.execute(text('SELECT version_num FROM alembic_version')).scalar_one() == '20261022_0007'
     engine.dispose()
 
 

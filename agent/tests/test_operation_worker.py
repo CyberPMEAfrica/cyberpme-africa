@@ -10,7 +10,7 @@ from cyberpme_agent.operation_worker import process_action, process_schedule
 def config(tmp_path):
     return Config(api_url='https://api.test',name='test',hostname='test',interval=10,
         enrollment_key='',backup_targets=(),state_path=tmp_path/'state.json',
-        operations={'enabled':True})
+        operations={'enabled':True}, mode='managed')
 
 
 def test_interrupted_receipt_is_not_replayed(tmp_path):

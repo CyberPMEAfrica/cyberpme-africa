@@ -13,6 +13,8 @@ os.environ["BOOTSTRAP_ADMIN_PASSWORD"] = "Test-password-very-strong-2026"
 os.environ["BOOTSTRAP_ADMIN_FORCE_SYNC"] = "true"
 os.environ["BOOTSTRAP_RECOVERY_KEY"] = "test-bootstrap-recovery-secret"
 os.environ["BOOTSTRAP_ADMIN_RESET_PASSWORD"] = ""
+os.environ["MFA_REQUIRED"] = "false"  # Legacy behavior tests; dedicated security tests enforce MFA.
+os.environ["ALLOW_LEGACY_ENROLLMENT"] = "true"  # Only these backward compatibility tests.
 
 import pytest
 from fastapi.testclient import TestClient
@@ -727,7 +729,7 @@ def test_ssl_check_uses_session_and_records_result(client: TestClient, monkeypat
 
 
 def test_agent_pairing_and_scan_job_end_to_end(client, user_headers):
-    issued = client.post("/api/v1/agent-enrollment-tokens", headers=user_headers)
+    issued = client.post("/api/v1/agent-enrollment-tokens", headers=user_headers, json={"mode": "network"})
     assert issued.status_code == 201
     token = issued.json()["enrollment_token"]
     payload = {"name": "PC bureau", "hostname": "bureau", "network_scan_capable": True}

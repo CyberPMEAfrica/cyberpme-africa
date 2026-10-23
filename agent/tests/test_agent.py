@@ -8,14 +8,14 @@ from cyberpme_agent import main as agent
 
 
 def test_config_supports_ubuntu_environment(monkeypatch):
-    monkeypatch.setenv("CYBERPME_API_URL", "http://10.0.2.2:8000/")
+    monkeypatch.setenv("CYBERPME_API_URL", "https://10.0.2.2:8000/")
     monkeypatch.setenv("CYBERPME_SERVER_NAME", "Ubuntu Wazuh Lab")
     monkeypatch.setenv("CYBERPME_HOSTNAME", "soc-vrt")
     monkeypatch.setenv("CYBERPME_ENROLLMENT_KEY", "test-secret")
 
     config = Config.from_environment(interval_override=30)
 
-    assert config.api_url == "http://10.0.2.2:8000"
+    assert config.api_url == "https://10.0.2.2:8000"
     assert config.name == "Ubuntu Wazuh Lab"
     assert config.hostname == "soc-vrt"
     assert config.enrollment_key == "test-secret"
@@ -61,7 +61,7 @@ def test_registration_persists_credentials_and_removes_pairing_token(tmp_path, m
 
 
 def test_scan_results_retry_after_network_failure(tmp_path, monkeypatch):
-    config = replace(Config.from_environment(), state_path=tmp_path / "state.json")
+    config = replace(Config.from_environment(), state_path=tmp_path / "state.json", mode="network")
     monkeypatch.setattr(agent, "run_network_scan", lambda _: [{"ip_address": "192.168.1.2"}])
     def offline(method, *args, **kwargs):
         if method == "POST":

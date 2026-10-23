@@ -6,6 +6,7 @@ from app.database import SessionLocal
 from app.models import User, Organization, SecurityEvent, utc_now
 from app.auth import hash_password
 from app.managed_actions import ManagedAction
+from app.security_models import AgentSecurity
 from sqlalchemy import select
 
 
@@ -14,6 +15,9 @@ def register(client, name='action-host'):
         headers={'X-Enrollment-Key':'ci-enrollment-secret'})
     assert result.status_code==200, result.text
     data=result.json()
+    with SessionLocal() as db:
+        db.get(AgentSecurity, UUID(data['server_id'])).mode = 'managed'
+        db.commit()
     return data['server_id'], {'Authorization':'Bearer '+data['agent_token']}
 
 

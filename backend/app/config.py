@@ -1,4 +1,4 @@
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     alert_email_to: str = "bocorodrigue43@mail.com"
     frontend_public_url: str = "http://localhost:5173"
     cors_origins: str = "http://localhost:5173"
-    agent_enrollment_key: str
+    agent_enrollment_key: str = ""
     bootstrap_organization_name: str = "CyberPME Lab"
     bootstrap_organization_slug: str = "cyberpme-lab"
     bootstrap_admin_email: str = ""
@@ -23,6 +23,13 @@ class Settings(BaseSettings):
     bootstrap_recovery_key: str = ""
     bootstrap_admin_reset_password: str = ""
     demo_seed_enabled: bool = False
+    # No production secrets have a fallback value. Generate a Fernet key offline.
+    mfa_encryption_key: str = ""
+    mfa_required: bool = True
+    allow_legacy_enrollment: bool = False
+    session_hours: int = Field(default=8, ge=1, le=8)
+    agent_token_days: int = Field(default=90, ge=1, le=90)
+    secure_cookies: bool = True
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @field_validator("database_url", mode="before")

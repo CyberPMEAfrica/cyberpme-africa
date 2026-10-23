@@ -7,6 +7,7 @@ from app.config import settings
 from app.database import Base
 from app import models  # noqa: F401
 from app import managed_actions  # noqa: F401
+from app import security_models  # noqa: F401
 
 
 config = context.config

@@ -74,3 +74,4 @@ export default function ManagedActions({ apiUrl, token, servers, currentUser, ev
     </article>)}</div>
   </section>;
 }
+import { apiFetch as fetch } from './api';

@@ -97,3 +97,4 @@ export default function InvitationPage({ apiUrl, token, onAuthenticated }) {
     </main>
   );
 }
+import { apiFetch as fetch } from './api';
