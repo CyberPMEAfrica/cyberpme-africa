@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from './api';
+import MfaQrCode from './MfaQrCode';
 
 export default function MfaPanel({ apiUrl, onReconnect }) {
   const [status, setStatus] = useState(null);
@@ -27,7 +28,7 @@ export default function MfaPanel({ apiUrl, onReconnect }) {
     : status?.enabled ? <><p>MFA activée · {status.recovery_codes_remaining} codes de secours restants.</p><details><summary>Remplacer mon application d’authentification</summary><p>Le mot de passe et un code actuel ou de secours sont nécessaires. Les autres sessions et les anciens codes seront invalidés. Une nouvelle configuration MFA sera obligatoire.</p><form onSubmit={submit}><label>Mot de passe actuel<input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" minLength={12} required/></label><label>Code MFA ou de secours<input value={code} onChange={e => setCode(e.target.value)} autoComplete="one-time-code" maxLength={64} required/></label><button disabled={busy}>Réinitialiser et reconfigurer la MFA</button></form></details></>
     : <form onSubmit={submit}><p>Ajoutez CyberPME dans une application d’authentification compatible TOTP. Aucun code n’est envoyé par e-mail ou SMS.</p>
       <label>Mot de passe actuel<input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" minLength={12} required/></label>
-      {setup && <><label>Clé à saisir dans l’application<input readOnly value={setup.secret}/></label><small>Nom : CyberPME · code à 6 chiffres · renouvellement toutes les 30 secondes. Ne partagez jamais cette clé.</small><label>Code actuel<input value={code} onChange={e => setCode(e.target.value)} inputMode="numeric" pattern="[0-9]{6}" autoComplete="one-time-code" required/></label></>}
+      {setup && <><MfaQrCode setup={setup}/><label>Clé à saisir dans l’application<input readOnly value={setup.secret}/></label><small>Nom : CyberPME · code à 6 chiffres · renouvellement toutes les 30 secondes. Ne partagez jamais cette clé.</small><label>Code actuel<input value={code} onChange={e => setCode(e.target.value)} inputMode="numeric" pattern="[0-9]{6}" autoComplete="one-time-code" required/></label></>}
       <button disabled={busy || !status}>{busy ? 'Vérification…' : setup ? 'Activer et recevoir les codes de secours' : 'Préparer la MFA'}</button>
     </form>}
     {error && <p className="error" role="alert">{error}</p>}

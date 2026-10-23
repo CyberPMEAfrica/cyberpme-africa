@@ -1,0 +1,51 @@
+.mfa-enrollment-qr {
+  display: grid;
+  justify-items: center;
+  gap: 16px;
+  min-width: 0;
+  margin: 0;
+  padding: 16px;
+  border: 1px solid var(--theme-border, #2b4c5d);
+  border-radius: 14px;
+  background: var(--theme-panel, #0b2231);
+}
+
+.mfa-qr-frame {
+  box-sizing: border-box;
+  width: min(100%, 272px);
+  min-width: 0;
+  padding: 8px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 6px 24px #0002;
+}
+
+.mfa-qr-frame svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+}
+
+.mfa-enrollment-qr figcaption {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  text-align: center;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--theme-text, #e9f2f7);
+}
+
+.mfa-enrollment-qr figcaption strong { font-size: 16px; }
+.mfa-enrollment-qr figcaption small,
+.mfa-qr-fallback { color: var(--theme-muted, #91aab7); }
+
+.login-card.mfa-setup-card { width: min(520px, 100%); }
+
+@media (max-width: 480px) {
+  .login-card.mfa-setup-card { padding: 20px; }
+  .mfa-setup-card > .settings-panel { padding: 16px; }
+  .mfa-enrollment-qr { padding: 12px 8px; }
+}
